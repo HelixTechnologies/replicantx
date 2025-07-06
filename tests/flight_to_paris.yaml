@@ -1,0 +1,14 @@
+name: "Book flight to Paris – business class"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: supabase
+  email: test-agent@helix.ai
+  password: super-secret
+  project_url: "{{ env.SUPABASE_URL }}"
+  api_key: "{{ env.SUPABASE_ANON_KEY }}"
+level: basic
+steps:
+  - user: "I want to fly to Paris next weekend"
+    expect_contains: ["economy", "business"]
+  - user: "Business please"
+    expect_regex: "(?i)booking.*Paris" 

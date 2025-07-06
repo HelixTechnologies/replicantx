@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "replicantx"
+version = "0.1.0"
+description = "End-to-end testing harness for AI agents via web service API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Helix Technologies Limited", email = "team@replicantx.org"}
+]
+keywords = ["ai", "agent", "testing", "e2e", "api"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+
+dependencies = [
+    "pydantic>=2.7",
+    "typer>=0.12.0",
+    "httpx>=0.27.0",
+    "PyYAML>=6.0",
+    "supabase>=2.0.0",
+    "jinja2>=3.1.0",
+    "rich>=13.0.0",
+    "pydantic-ai>=0.0.15",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+cli = [
+    "typer[all]>=0.12.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.8.0",
+]
+# Note: PydanticAI is included in core dependencies and handles all LLM providers
+# Optional providers can be installed separately based on PydanticAI documentation
+openai = [
+    "openai>=1.0.0",
+]
+anthropic = [
+    "anthropic>=0.34.0",
+]
+all = [
+    "typer[all]>=0.12.0",
+    "openai>=1.0.0",
+    "anthropic>=0.34.0",
+]
+
+[project.scripts]
+replicantx = "replicantx.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/helixtechnologies/replicantx"
+Documentation = "https://replicantx.org"
+Repository = "https://github.com/helixtechnologies/replicantx"
+Issues = "https://github.com/helixtechnologies/replicantx/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["replicantx*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true 

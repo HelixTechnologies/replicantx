@@ -1,0 +1,9 @@
+name: "Simple API Test - No Auth"
+base_url: https://jsonplaceholder.typicode.com/posts
+auth:
+  provider: noop
+level: basic
+steps:
+  - user: "1"
+    expect_contains: ["id", "title", "body"]
+    expect_regex: "(?i)userId.*1" 

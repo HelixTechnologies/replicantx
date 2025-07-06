@@ -1,0 +1,34 @@
+name: "Replicant Agent - Customer Support Inquiry"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/support
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Get help with a billing issue and update account information"
+  facts:
+    name: "Michael Chen"
+    account_number: "ACC-789456"
+    email: "michael.chen@email.com"
+    phone: "+1-555-9876"
+    issue_type: "billing"
+    last_payment: "$99.99 on March 15th"
+    new_address: "123 Oak Street, San Francisco, CA 94102"
+    plan_type: "Premium"
+  system_prompt: |
+    You are a customer named Michael Chen who needs help with a billing issue.
+    You're sometimes forgetful and might give incomplete information initially.
+    You're friendly but can get a bit frustrated if the agent doesn't understand
+    your issue quickly. Provide information from your facts when asked, but
+    don't volunteer everything at once.
+  initial_message: "Hello, I have a problem with my bill this month."
+  max_turns: 12
+  completion_keywords:
+    - "resolved"
+    - "ticket created"
+    - "fixed"
+    - "updated successfully"
+    - "issue closed"
+  llm:
+    model: "test"  # PydanticAI model: "openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest", "test"
+    temperature: 0.8
+    max_tokens: 120 

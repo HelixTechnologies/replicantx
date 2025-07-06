@@ -1,0 +1,22 @@
+name: ReplicantX E2E Tests
+on:
+  pull_request: { types: [opened, synchronize, reopened] }
+jobs:
+  replicantx:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      REPLICANTX_TARGET: pr-${{ github.event.pull_request.number }}-helix-api.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install "replicantx[cli]"
+      - run: |
+          until curl -sf "https://$REPLICANTX_TARGET/health"; do
+            echo "Waiting for preview…"; sleep 5; done
+      - run: replicantx run tests/*.yaml --report report.md --ci
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: always()
+        with: { path: report.md } 

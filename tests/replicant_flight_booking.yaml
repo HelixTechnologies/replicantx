@@ -1,0 +1,47 @@
+name: "Replicant Agent - Flight Booking Conversation"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Book a business class flight to Paris for next weekend"
+  facts:
+    name: "Sarah Johnson"
+    email: "sarah.johnson@example.com" 
+    phone: "+1-555-0123"
+    travel_class: "business"
+    destination: "Paris"
+    departure_city: "New York"
+    travel_date: "next Friday"
+    passengers: 1
+    budget: "$3000"
+    preferences: "aisle seat, vegetarian meal"
+  system_prompt: |
+    You are a helpful user named Sarah Johnson trying to book a flight to Paris. 
+    You have all the necessary information but you're a typical user who doesn't 
+    provide all details upfront. You respond naturally to questions and provide 
+    the requested information from your available facts. You're polite and 
+    conversational, but sometimes need prompting to remember details.
+  initial_message: "Hi, I'd like to book a flight to Paris for next weekend."
+  max_turns: 15
+  completion_keywords: 
+    - "booked"
+    - "confirmed" 
+    - "reservation number"
+    - "booking complete"
+    - "thank you for booking"
+  fact_keywords:
+    name: ["name", "called", "who are you", "your name", "full name", "first name"]
+    email: ["email", "e-mail", "email address", "contact", "reach you"]
+    phone: ["phone", "number", "telephone", "mobile", "cell", "contact number"]
+    travel_class: ["class", "economy", "business", "first", "premium", "cabin", "seat type"]
+    destination: ["where to", "destination", "going", "travel to", "fly to", "city", "paris"]
+    departure_city: ["from", "leaving", "departure", "origin", "starting", "where from"]
+    travel_date: ["when", "date", "time", "day", "departure date", "travel date", "weekend"]
+    passengers: ["how many", "passengers", "people", "travelers", "persons", "seats"]
+    budget: ["budget", "price", "cost", "spend", "money", "willing to pay", "price range"]
+    preferences: ["prefer", "like", "want", "need", "special requests", "meal", "seat"]
+  llm:
+    model: "test"  # PydanticAI model: "openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest", "test"
+    temperature: 0.7
+    max_tokens: 150 

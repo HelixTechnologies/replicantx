@@ -1,0 +1,9 @@
+name: "Basic Test - No Agent Required"
+base_url: "https://httpbin.org/post"
+auth:
+  provider: noop
+level: basic
+steps:
+  - user: "Hello, test message"
+    expect_contains: ["json"]
+    timeout_seconds: 10
