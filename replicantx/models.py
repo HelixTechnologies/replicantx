@@ -145,7 +145,7 @@ class ReplicantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     
     goal: str = Field(..., description="The goal the Replicant should achieve")
-    facts: Dict[str, Any] = Field(default_factory=dict, description="Facts the Replicant knows (e.g., Name, Travel Class)")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="Facts the Replicant knows (e.g., name, email, preferences)")
     system_prompt: str = Field(
         "You are a helpful user trying to achieve a goal. You have access to certain facts but may not remember to provide all details upfront. Answer questions based on your available facts.",
         description="System prompt for the Replicant agent"
@@ -153,12 +153,8 @@ class ReplicantConfig(BaseModel):
     initial_message: str = Field(..., description="Initial message to start the conversation")
     max_turns: int = Field(20, description="Maximum conversation turns")
     completion_keywords: List[str] = Field(
-        default_factory=lambda: ["complete", "finished", "done", "booked", "confirmed", "thank you", "success"],
+        default_factory=lambda: ["complete", "finished", "done", "confirmed", "thank you", "success"],
         description="Keywords that indicate conversation completion"
-    )
-    fact_keywords: Optional[Dict[str, List[str]]] = Field(
-        None,
-        description="Custom mapping of fact keys to keywords/phrases that trigger them (e.g., {'name': ['name', 'called', 'who are you'], 'email': ['email', 'contact']})"
     )
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
 

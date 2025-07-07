@@ -4,16 +4,16 @@ auth:
   provider: noop
 level: agent
 replicant:
-  goal: "Get help with a billing issue and update account information"
+  goal: "Get help with a billing issue: identify vendor and address"
   facts:
     name: "Michael Chen"
     account_number: "ACC-789456"
     email: "michael.chen@email.com"
     phone: "+1-555-9876"
     issue_type: "billing"
-    last_payment: "$99.99 on March 15th"
-    new_address: "123 Oak Street, San Francisco, CA 94102"
-    plan_type: "Premium"
+    suspicious_transaction: "$99.99 on March 15th"
+    address: "123 Oak Street, San Francisco, CA 94102"
+    account_type: "Premium"
   system_prompt: |
     You are a customer named Michael Chen who needs help with a billing issue.
     You're sometimes forgetful and might give incomplete information initially.

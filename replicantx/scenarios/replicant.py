@@ -30,71 +30,6 @@ class ConversationState(BaseModel):
     extracted_info: Dict[str, Any] = Field(default_factory=dict, description="Information extracted from the conversation")
 
 
-class FactMatcher(BaseModel):
-    """Utility for matching questions to available facts."""
-    model_config = {"extra": "forbid"}
-    
-    facts: Dict[str, Any] = Field(..., description="Available facts")
-    fact_keywords: Optional[Dict[str, List[str]]] = Field(None, description="Custom fact-to-keywords mapping")
-    
-    def find_relevant_facts(self, question: str) -> Dict[str, Any]:
-        """Find facts relevant to a given question.
-        
-        Args:
-            question: The question or prompt from the API
-            
-        Returns:
-            Dictionary of relevant facts
-        """
-        question_lower = question.lower()
-        relevant_facts = {}
-        
-        # Use custom fact_keywords if provided, otherwise fall back to defaults
-        if self.fact_keywords:
-            fact_keywords = self.fact_keywords
-        else:
-            # Default keyword mappings for different fact types
-            fact_keywords = {
-                "name": ["name", "called", "who are you", "your name"],
-                "email": ["email", "e-mail", "email address", "contact"],
-                "phone": ["phone", "number", "telephone", "mobile", "cell"],
-                "travel_class": ["class", "economy", "business", "first", "premium"],
-                "destination": ["where", "destination", "going", "travel to", "fly to"],
-                "departure": ["from", "leaving", "departure", "origin"],
-                "date": ["when", "date", "time", "day", "month"],
-                "passengers": ["how many", "passengers", "people", "travelers"],
-                "budget": ["budget", "price", "cost", "spend", "money"],
-                "preferences": ["prefer", "like", "want", "need"],
-            }
-        
-        # Check each fact against the question
-        for fact_key, fact_value in self.facts.items():
-            fact_key_lower = fact_key.lower()
-            
-            # Direct key match
-            if fact_key_lower in question_lower:
-                relevant_facts[fact_key] = fact_value
-                continue
-            
-            # Keyword-based matching using custom or default mappings
-            if fact_key in fact_keywords:
-                # Direct fact key mapping
-                keywords = fact_keywords[fact_key]
-                if any(keyword in question_lower for keyword in keywords):
-                    relevant_facts[fact_key] = fact_value
-                    continue
-            
-            # Fallback: category-based matching (for default keywords only)
-            if not self.fact_keywords:
-                for category, keywords in fact_keywords.items():
-                    if fact_key_lower in category or category in fact_key_lower:
-                        if any(keyword in question_lower for keyword in keywords):
-                            relevant_facts[fact_key] = fact_value
-                            break
-        
-        return relevant_facts
-
-
 class ResponseGenerator(BaseModel):
     """Generates responses using PydanticAI agent with system prompt and available facts."""
     model_config = {"extra": "forbid"}
@@ -138,7 +73,7 @@ class ResponseGenerator(BaseModel):
                 context += "\n"
             
             context += f"Current API message: {api_message}\n\n"
-            context += "Please generate a natural response as a user who is trying to book a flight. "
+            context += "Please generate a natural response as a user working toward your goal. "
             context += "Use the available facts when appropriate, and respond naturally to the API's question or statement."
             
             # Create and use PydanticAI agent
@@ -183,7 +118,6 @@ class ReplicantAgent(BaseModel):
     
     config: ReplicantConfig = Field(..., description="Replicant configuration")
     state: ConversationState = Field(default_factory=ConversationState, description="Current conversation state")
-    fact_matcher: FactMatcher = Field(..., description="Fact matching utility")
     response_generator: ResponseGenerator = Field(..., description="Response generation utility")
     
     @classmethod
@@ -196,8 +130,6 @@ class ReplicantAgent(BaseModel):
         Returns:
             Configured Replicant agent
         """
-        fact_matcher = FactMatcher(facts=config.facts, fact_keywords=config.fact_keywords)
-        
         # Build model settings
         model_settings = {}
         if config.llm.temperature is not None:
@@ -214,7 +146,6 @@ class ReplicantAgent(BaseModel):
         
         return cls(
             config=config,
-            fact_matcher=fact_matcher,
             response_generator=response_generator
         )
     

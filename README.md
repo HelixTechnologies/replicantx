@@ -49,9 +49,36 @@ steps:
 ```
 
 **Agent Scenario (Level 2):**
+
+*Generic Customer Support Example:*
 ```yaml
-# tests/agent_test.yaml
-name: "Replicant Agent - Flight Booking"
+# tests/support_test.yaml
+name: "Customer Support - Account Issue"
+base_url: https://your-api.com/api/support
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Get help with account access issue"
+  facts:
+    name: "Alex Chen"
+    email: "alex.chen@example.com"
+    account_id: "ACC-123456"
+    issue_type: "login_problem"
+    last_login: "2 weeks ago"
+  system_prompt: |
+    You are a customer seeking help with an account issue. You have the 
+    necessary information but don't provide all details upfront.
+    Answer questions based on your available facts.
+  initial_message: "Hi, I'm having trouble accessing my account."
+  max_turns: 12
+  completion_keywords: ["resolved", "ticket created", "issue fixed"]
+```
+
+*Travel Booking Example:*
+```yaml
+# tests/travel_test.yaml
+name: "Travel Booking - Flight Reservation"
 base_url: https://your-api.com/api/chat
 auth:
   provider: noop
@@ -65,7 +92,7 @@ replicant:
     destination: "Paris"
     budget: "$2000"
   system_prompt: |
-    You are a helpful user trying to book a flight. You have the 
+    You are a customer trying to book a flight. You have the 
     necessary information but don't provide all details upfront.
     Answer questions based on your available facts.
   initial_message: "Hi, I'd like to book a flight to Paris."
@@ -518,51 +545,12 @@ The Replicant agent is a Pydantic-based intelligent conversational agent that:
 - **Goal-Oriented**: Works toward specific objectives with completion detection
 - **Context Awareness**: Maintains conversation history and state
 
-### Fact Matching
-The agent automatically matches API questions to relevant facts:
-- **Name questions**: "What's your name?" → Uses `name` fact
-- **Contact info**: "Email address?" → Uses `email` fact  
-- **Preferences**: "Which class?" → Uses `travel_class` fact
-- **Smart keywords**: Recognizes variations and synonyms
-
-#### Custom Fact Keywords
-You can define custom keyword mappings in your test scenarios for more precise fact matching:
-
-```yaml
-replicant:
-  goal: "Book a flight to Paris"
-  facts:
-    name: "Sarah Johnson"
-    email: "sarah@example.com"
-    travel_class: "business"
-    destination: "Paris"
-  fact_keywords:
-    name: ["name", "called", "who are you", "full name", "identity"]
-    email: ["email", "e-mail", "contact", "reach you", "address"]
-    travel_class: ["class", "cabin", "seat type", "premium", "economy"]
-    destination: ["where to", "going", "city", "travel to", "fly to"]
-  # ... rest of config
-```
-
-**Benefits of Custom Keywords:**
-- **Domain-specific**: Match terminology specific to your API
-- **Improved accuracy**: Reduce false positives and missed matches
-- **Multilingual**: Support different languages or dialects
-- **Synonyms**: Handle variations in how users phrase questions
-
-**Example Matching:**
-```yaml
-# With custom keywords for "specialty" fact
-fact_keywords:
-  specialty: ["expertise", "skill", "good at", "focus", "specialization"]
-
-# Now these all match the specialty fact:
-# "What's your expertise?" → specialty: "Machine Learning"
-# "What are you good at?" → specialty: "Machine Learning"  
-# "What's your focus?" → specialty: "Machine Learning"
-```
-
-If no custom `fact_keywords` are provided, the system uses sensible defaults for common fact types.
+### LLM-Powered Fact Usage
+The agent intelligently uses configured facts through LLM integration:
+- **Context-aware**: LLMs understand when facts are relevant to questions
+- **Natural integration**: Facts are woven naturally into conversation responses  
+- **Smart timing**: Agent knows when to volunteer information vs. wait to be asked
+- **Conversation memory**: Recent chat history provides context for fact usage
 
 ### System Prompt Examples
 
@@ -604,21 +592,42 @@ ReplicantX uses **PydanticAI** for powerful LLM integration with multiple provid
 
 Add LLM configuration to your agent scenarios using PydanticAI model strings:
 
+*Technical Support Example:*
 ```yaml
 level: agent
 replicant:
-  goal: "Book a flight to Paris"
+  goal: "Get technical support for my account"
   facts:
-    name: "Sarah Johnson"
+    name: "Jordan Smith"
     # ... other facts
   system_prompt: |
-    You are a helpful user trying to book a flight.
+    You are a customer seeking help with a technical issue.
     Use your available facts to answer questions naturally.
   # ... other config
   llm:
     model: "openai:gpt-4.1-mini"     # PydanticAI model string
     temperature: 0.7           # Response creativity (0.0-1.0)
     max_tokens: 150            # Maximum response length
+```
+
+*Flight Booking Example:*
+```yaml
+level: agent
+replicant:
+  goal: "Book a business class flight to Paris"
+  facts:
+    name: "Sarah Johnson"
+    destination: "Paris"
+    travel_class: "business"
+    # ... other facts
+  system_prompt: |
+    You are a customer trying to book a flight. You have the 
+    necessary information but don't provide all details upfront.
+  # ... other config
+  llm:
+    model: "anthropic:claude-3-5-sonnet-latest"  # PydanticAI model string
+    temperature: 0.8           # Response creativity (0.0-1.0)
+    max_tokens: 200            # Maximum response length
 ```
 
 ### Model String Examples
@@ -685,11 +694,12 @@ pip install replicantx
 4. **Graceful Fallback**: If LLM calls fail, the system falls back to rule-based responses
 5. **Conversation Memory**: Recent conversation history is maintained for context
 
-### Example with PydanticAI
+### Examples with PydanticAI
 
+*Customer Support Example:*
 ```yaml
-name: "LLM-Powered Agent Test"
-base_url: https://api.example.com/chat
+name: "Customer Support - Billing Issue"
+base_url: https://api.example.com/support
 auth:
   provider: noop
 level: agent
@@ -713,7 +723,41 @@ replicant:
     max_tokens: 120
 ```
 
-This enables much more natural and contextually aware conversations compared to rule-based responses.
+*Flight Booking Example:*
+```yaml
+name: "Travel Booking - Flight to Paris"
+base_url: https://api.example.com/chat
+auth:
+  provider: supabase
+  project_url: "{{ env.SUPABASE_URL }}"
+  api_key: "{{ env.SUPABASE_ANON_KEY }}"
+  email: "{{ env.TEST_USER_EMAIL }}"
+  password: "{{ env.TEST_USER_PASSWORD }}"
+level: agent
+replicant:
+  goal: "Book a business class flight to Paris for next weekend"
+  facts:
+    name: "Sarah Johnson"
+    email: "sarah.johnson@example.com"
+    travel_class: "business"
+    destination: "Paris"
+    departure_city: "New York"
+    budget: "$3000"
+    preferences: "aisle seat, vegetarian meal"
+  system_prompt: |
+    You are a customer trying to book a flight to Paris. You have all 
+    the necessary information but you're a typical user who doesn't 
+    provide all details upfront. You're polite and conversational.
+  initial_message: "Hi, I'd like to book a flight to Paris for next weekend."
+  max_turns: 15
+  completion_keywords: ["booked", "confirmed", "reservation number"]
+  llm:
+    model: "anthropic:claude-3-5-sonnet-latest"  # PydanticAI model string
+    temperature: 0.7
+    max_tokens: 150
+```
+
+These examples enable much more natural and contextually aware conversations compared to rule-based responses.
 
 ## 🔧 GitHub Actions Integration
 

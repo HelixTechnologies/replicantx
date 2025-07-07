@@ -491,7 +491,7 @@ class AgentScenarioRunner:
                 "i'd be happy", "i can help", "let me help", "how can i", "ready to help",
                 "i'm ready", "assist you", "help you", "happy to", "here to help",
                 "would you prefer", "what would you like", "which", "do you", "can you",
-                "let me know", "please tell me", "what type", "what class", "what kind",
+                "let me know", "please tell me", "what type", "what kind", "what category",
                 "how many", "will you be", "are you", "have you", "would you", "do you need",
                 "any", "prefer", "select", "choose", "pick", "option", "details", "information"
             ])
