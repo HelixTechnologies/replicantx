@@ -76,10 +76,10 @@ def run(
         False, "--verbose", "-v", help="Enable verbose output"
     ),
     debug: bool = typer.Option(
-        False, "--debug", help="Enable debug mode with technical details (HTTP, validation, AI prompts)"
+        False, "--debug", help="Enable debug mode: Shows detailed technical information including HTTP client setup, request payloads, response validation, AI processing, and assertion results. Perfect for troubleshooting failed tests and performance analysis."
     ),
     watch: bool = typer.Option(
-        False, "--watch", help="Enable watch mode for real-time conversation monitoring"
+        False, "--watch", help="Enable watch mode: Real-time conversation monitoring with live timestamps, user/assistant messages, step results, and final summaries. Perfect for demos, monitoring long tests, and validating conversation flow."
     ),
     timeout: Optional[int] = typer.Option(
         None, "--timeout", "-t", help="Override default timeout in seconds"
@@ -88,7 +88,18 @@ def run(
         None, "--max-retries", help="Override default max retries"
     ),
 ):
-    """Run test scenarios from YAML files."""
+    """Run test scenarios from YAML files.
+
+MONITORING & DEBUGGING:
+  --debug: Technical deep-dive with HTTP requests, AI model details, and validation results
+  --watch: Real-time conversation monitoring with timestamps and live updates  
+  --debug --watch: Combined mode for comprehensive analysis during development
+
+EXAMPLES:
+  replicantx run tests/*.yaml --report report.md
+  replicantx run tests/agent_test.yaml --watch --debug
+  replicantx run tests/*.yaml --ci --report results.json
+    """
     console.print(f"🚀 ReplicantX {__version__} - Starting test execution")
     
     # Find all test files
