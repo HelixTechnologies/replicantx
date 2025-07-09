@@ -156,6 +156,7 @@ class ReplicantConfig(BaseModel):
         default_factory=lambda: ["complete", "finished", "done", "confirmed", "thank you", "success"],
         description="Keywords that indicate conversation completion"
     )
+    fullconversation: bool = Field(True, description="Whether to send full conversation history (including responses) with each request")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
 
 

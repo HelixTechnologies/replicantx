@@ -346,6 +346,7 @@ replicant:
     - "success"
     - "completed"
     - "finished"
+  fullconversation: true  # Send full conversation history with each request
 ```
 
 #### Politeness Validation
@@ -411,9 +412,9 @@ replicantx run tests/agent_test.yaml --watch
 
 **What you see:**
 - 👥 **Live conversation setup** with goal and facts
-- 👤 **User messages** as they're sent (with timestamps)
+- 👤 **Replicant messages** as they're sent (with timestamps)
 - ⏱️ **Response waiting indicators**
-- 🤖 **Assistant responses** as received
+- 🤖 **Agent responses** as received
 - ✅/❌ **Step results** with pass/fail status and timing
 - 📊 **Final summary** with success rate, duration, goal achievement
 
@@ -427,10 +428,10 @@ replicantx run tests/agent_test.yaml --watch
 ```
 [22:04:42] 👥 LIVE CONVERSATION - Starting agent scenario
 [22:04:42] 🎯 Goal: Book a business class flight to Paris
-[22:04:42] 👤 User: Hi, I'd like to book a flight to Paris.
+[22:04:42] 👤 Replicant: Hi, I'd like to book a flight to Paris.
 [22:04:52] ✅ Step 1: PASSED (10.2s)
-[22:04:52] 🤖 Assistant: What cabin class would you prefer?
-[22:04:53] 👤 User: Business class, please.
+[22:04:52] 🤖 Agent: What cabin class would you prefer?
+[22:04:53] 👤 Replicant: Business class, please.
 [22:05:03] ✅ Step 2: PASSED (9.8s)
 ```
 
@@ -551,6 +552,34 @@ The agent intelligently uses configured facts through LLM integration:
 - **Natural integration**: Facts are woven naturally into conversation responses  
 - **Smart timing**: Agent knows when to volunteer information vs. wait to be asked
 - **Conversation memory**: Recent chat history provides context for fact usage
+
+### Conversation State Management
+ReplicantX provides flexible conversation state management to handle different API architectures:
+
+#### Full Conversation History (`fullconversation: true`)
+Sends the complete conversation history (including all responses) with each request:
+```yaml
+replicant:
+  fullconversation: true  # Default behavior
+```
+
+**Benefits:**
+- ✅ **Complete Context**: API receives full conversation state
+- ✅ **Stateless APIs**: Works with APIs that don't maintain session state
+- ✅ **Microservices**: Suitable for distributed systems
+- ✅ **Testing Realism**: Mimics real-world stateless interactions
+
+#### Limited History (`fullconversation: false`)
+Sends only the last 10 messages for performance:
+```yaml
+replicant:
+  fullconversation: false
+```
+
+**Use Cases:**
+- 🔧 **Performance Testing**: Reduce payload size for high-volume testing
+- 🔧 **Legacy APIs**: Compatible with APIs expecting limited context
+- 🔧 **Memory Constraints**: When API has payload size limitations
 
 ### System Prompt Examples
 
@@ -717,6 +746,7 @@ replicant:
   initial_message: "Hi, I have a question about my recent bill."
   max_turns: 12
   completion_keywords: ["resolved", "ticket created", "issue closed"]
+  fullconversation: true  # Send full conversation history with each request
   llm:
     model: "openai:gpt-4o"  # PydanticAI model string
     temperature: 0.8
@@ -742,20 +772,23 @@ replicant:
     travel_class: "business"
     destination: "Paris"
     departure_city: "New York"
+    travel_date: "next Friday"
+    passengers: 1
     budget: "$3000"
     preferences: "aisle seat, vegetarian meal"
   system_prompt: |
-    You are a customer trying to book a flight to Paris. You have all 
-    the necessary information but you're a typical user who doesn't 
-    provide all details upfront. You're polite and conversational.
+    You are a helpful user trying to book a flight. You have all the 
+    necessary information but you're a typical user who doesn't 
+    provide all details upfront.
   initial_message: "Hi, I'd like to book a flight to Paris for next weekend."
   max_turns: 15
-  completion_keywords: ["booked", "confirmed", "reservation number"]
+  completion_keywords: ["booked", "confirmed", "reservation number", "booking complete"]
+  fullconversation: true  # Send full conversation history with each request
   llm:
-    model: "anthropic:claude-3-5-sonnet-latest"  # PydanticAI model string
+    model: "openai:gpt-4o"
     temperature: 0.7
     max_tokens: 150
-```
+
 
 These examples enable much more natural and contextually aware conversations compared to rule-based responses.
 

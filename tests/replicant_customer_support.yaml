@@ -28,6 +28,7 @@ replicant:
     - "fixed"
     - "updated successfully"
     - "issue closed"
+  fullconversation: true  # Send full conversation history with each request
   llm:
     model: "test"  # PydanticAI model: "openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest", "test"
     temperature: 0.8

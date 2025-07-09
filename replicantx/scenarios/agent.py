@@ -384,10 +384,18 @@ class AgentScenarioRunner:
         # Include conversation history for context
         conversation_history = []
         if self.replicant_agent:
-            conversation_history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in self.replicant_agent.state.conversation_history[-10:]  # Last 10 messages
-            ]
+            if self.config.replicant.fullconversation:
+                # Send full conversation history including responses
+                conversation_history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in self.replicant_agent.state.conversation_history
+                ]
+            else:
+                # Send only last 10 messages (legacy behavior)
+                conversation_history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in self.replicant_agent.state.conversation_history[-10:]
+                ]
         
         payload = {
             "message": user_message,

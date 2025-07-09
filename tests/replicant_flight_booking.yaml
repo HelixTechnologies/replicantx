@@ -30,6 +30,7 @@ replicant:
     - "reservation number"
     - "booking complete"
     - "thank you for booking"
+  fullconversation: true  # Send full conversation history with each request
   llm:
     model: "test"  # PydanticAI model: "openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest", "test"
     temperature: 0.7

@@ -1,0 +1,25 @@
+name: "Replicant Agent - Limited History Test"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Test limited conversation history"
+  facts:
+    name: "Test User"
+    email: "test@example.com"
+    preference: "quick responses"
+  system_prompt: |
+    You are a test user with limited conversation history.
+    Keep responses brief and to the point.
+  initial_message: "Hello, I'm testing limited history mode."
+  max_turns: 5
+  completion_keywords: 
+    - "test complete"
+    - "finished"
+    - "done"
+  fullconversation: false  # Only send last 10 messages
+  llm:
+    model: "test"
+    temperature: 0.5
+    max_tokens: 100 
