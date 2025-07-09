@@ -12,22 +12,25 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from ..models import SessionMode
+from ..models import SessionMode, SessionFormat
 
 
 class SessionManager:
     """Manages conversation session lifecycle and state."""
     
-    def __init__(self, session_mode: SessionMode, session_id: Optional[str] = None, timeout_seconds: int = 300):
+    def __init__(self, session_mode: SessionMode, session_id: Optional[str] = None, 
+                 timeout_seconds: int = 300, session_format: SessionFormat = SessionFormat.UUID):
         """Initialize the session manager.
         
         Args:
             session_mode: How to handle session ID generation
             session_id: Fixed session ID (for FIXED mode)
             timeout_seconds: Session timeout in seconds
+            session_format: Format for auto-generated session IDs
         """
         self.session_mode = session_mode
         self.timeout_seconds = timeout_seconds
+        self.session_format = session_format
         self.created_at = datetime.now()
         self.last_activity = datetime.now()
         
@@ -46,7 +49,7 @@ class SessionManager:
         if self.session_mode == SessionMode.DISABLED:
             return None
         elif self.session_mode == SessionMode.AUTO:
-            return f"replicantx_{uuid.uuid4().hex[:8]}"
+            return self._generate_session_id()
         elif self.session_mode == SessionMode.FIXED:
             if not session_id:
                 raise ValueError("Fixed session mode requires session_id to be provided")
@@ -58,6 +61,19 @@ class SessionManager:
             return env_session_id
         else:
             raise ValueError(f"Unsupported session mode: {self.session_mode}")
+    
+    def _generate_session_id(self) -> str:
+        """Generate a session ID based on the configured format.
+        
+        Returns:
+            Generated session ID string
+        """
+        if self.session_format == SessionFormat.REPLICANTX:
+            return f"replicantx_{uuid.uuid4().hex[:8]}"
+        elif self.session_format == SessionFormat.UUID:
+            return str(uuid.uuid4())
+        else:
+            raise ValueError(f"Unsupported session format: {self.session_format}")
     
     def update_activity(self) -> None:
         """Update the last activity timestamp."""
@@ -87,6 +103,7 @@ class SessionManager:
         return {
             "session_id": self.session_id,
             "session_mode": self.session_mode.value,
+            "session_format": self.session_format.value,
             "created_at": self.created_at.isoformat(),
             "last_activity": self.last_activity.isoformat(),
             "timeout_seconds": self.timeout_seconds,

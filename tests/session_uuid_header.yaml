@@ -1,0 +1,32 @@
+name: "Session Management - UUID Header"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Book a hotel room in Tokyo"
+  facts:
+    name: "Yuki Tanaka"
+    email: "yuki.tanaka@example.com"
+    destination: "Tokyo"
+    check_in: "next Monday"
+    check_out: "next Friday"
+    room_type: "single"
+    budget: "¥15,000 per night"
+  system_prompt: "You are a business traveler booking a hotel. Be polite and provide details when asked."
+  initial_message: "Hello, I need to book a hotel room in Tokyo for next Monday to Friday."
+  max_turns: 12
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "openai_session"  # Session-aware OpenAI format
+  session_mode: "auto"  # Auto-generate session ID
+  session_format: "uuid"  # Use UUID format
+  session_placement: "header"  # Place session ID in headers
+  session_variable_name: "x-conversation-id"  # Custom header name
+  session_timeout: 900  # 15 minutes
+  llm:
+    model: "test"
+    temperature: 0.7
+timeout_seconds: 120
+max_retries: 3
+retry_delay_seconds: 1.0
+validate_politeness: true 

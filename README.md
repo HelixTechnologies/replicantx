@@ -686,10 +686,9 @@ replicant:
   session_mode: auto  # disabled, auto, fixed, or env
   session_id: null  # Required when session_mode is "fixed"
   session_timeout: 300  # Session timeout in seconds (default: 5 minutes)
-  
-  # Session-aware payload formats
-  payload_format: openai_session  # openai_session, simple_session, restful_session
-  fullconversation: false  # Disable when using session management
+  session_format: uuid  # replicantx or uuid (default: uuid)
+  session_placement: body  # header, body, or url (default: body)
+  session_variable_name: session_id  # Custom name for session variable
 ```
 
 **Session Modes:**
@@ -698,27 +697,57 @@ replicant:
 - `fixed`: Use a specific session ID (requires `session_id` field)
 - `env`: Use session ID from `REPLICANTX_SESSION_ID` environment variable
 
+**Session Formats:**
+- `uuid` (default): Standard UUID format (e.g., `550e8400-e29b-41d4-a716-446655440000`)
+- `replicantx`: ReplicantX format (e.g., `replicantx_c8ff856c`)
+
+**Session Placement:**
+- `body` (default): Session ID in request body/payload
+- `header`: Session ID in HTTP headers
+- `url`: Session ID in URL path (RESTful)
+
+**Session Variable Name:**
+- Custom name for the session variable in headers or body
+- Examples: `session_id`, `conversation_id`, `x-conversation-id`, `chat_id`
+
 **Session-Aware Payload Formats:**
-- `openai_session`: `{"session_id": "...", "message": "..."}`
-- `simple_session`: `{"conversation_id": "...", "message": "..."}`
-- `restful_session`: `{"message": "..."}` (session ID in URL path)
+- `openai_session`: OpenAI-compatible with session support
+- `simple_session`: Simple format with session support
+- `restful_session`: RESTful format with session support
 
 ##### Example Configurations
 
-**Auto-Generated Session:**
+**Auto-Generated UUID Session (Recommended):**
 ```yaml
 replicant:
   session_mode: auto
+  session_format: uuid  # Standard UUID format
+  session_placement: body
+  session_variable_name: session_id
   payload_format: openai_session
   fullconversation: false
   session_timeout: 600  # 10 minutes
 ```
 
-**Fixed Session ID:**
+**ReplicantX Format with Header:**
+```yaml
+replicant:
+  session_mode: auto
+  session_format: replicantx  # ReplicantX format
+  session_placement: header
+  session_variable_name: x-conversation-id
+  payload_format: openai_session
+  fullconversation: false
+```
+
+**Fixed Session ID with Custom Variable:**
 ```yaml
 replicant:
   session_mode: fixed
   session_id: "test_session_12345"
+  session_format: uuid
+  session_placement: body
+  session_variable_name: conversation_id
   payload_format: simple_session
   fullconversation: false
 ```
@@ -727,12 +756,14 @@ replicant:
 ```yaml
 replicant:
   session_mode: auto
+  session_format: uuid
+  session_placement: url
   payload_format: restful_session
   fullconversation: false
 # Results in requests to: /conversations/{session_id}/messages
 ```
 
-**Environment-Based Session:**
+**Environment-Based Session with Header:**
 ```bash
 # Set environment variable
 export REPLICANTX_SESSION_ID="prod_session_abc123"
@@ -740,6 +771,9 @@ export REPLICANTX_SESSION_ID="prod_session_abc123"
 # Use in YAML
 replicant:
   session_mode: env
+  session_format: uuid
+  session_placement: header
+  session_variable_name: x-chat-id
   payload_format: openai_session
   fullconversation: false
 ```
@@ -807,9 +841,9 @@ replicant:
 
 ### Session Management Examples
 
-**Auto-Generated Session (Recommended):**
+**UUID Format with Header (Recommended for APIs):**
 ```yaml
-name: "Flight Booking with Session"
+name: "Flight Booking with UUID Header"
 base_url: "https://api.example.com/chat"
 auth:
   provider: "noop"
@@ -825,17 +859,20 @@ replicant:
   system_prompt: "You are a customer booking a flight. Be polite and provide details when asked."
   initial_message: "Hi, I need to book a flight from London to Paris for next Friday."
   max_turns: 15
-  session_mode: auto  # Auto-generate session ID
-  payload_format: openai_session  # Session-aware format
-  fullconversation: false  # Use session instead of full conversation
-  session_timeout: 600  # 10 minutes
+  session_mode: auto
+  session_format: uuid  # Standard UUID format
+  session_placement: header  # In HTTP headers
+  session_variable_name: x-conversation-id  # Custom header name
+  payload_format: openai_session
+  fullconversation: false
+  session_timeout: 600
   llm:
     model: "test"
 ```
 
-**Fixed Session ID (For Testing):**
+**ReplicantX Format with Body:**
 ```yaml
-name: "Customer Support with Fixed Session"
+name: "Customer Support with ReplicantX Body"
 base_url: "https://api.example.com/support"
 auth:
   provider: "noop"
@@ -849,18 +886,20 @@ replicant:
   system_prompt: "You are a customer with a billing question."
   initial_message: "Hello, I have a billing question."
   max_turns: 10
-  session_mode: fixed
-  session_id: "test_session_12345"  # Fixed session ID
+  session_mode: auto
+  session_format: replicantx  # ReplicantX format
+  session_placement: body  # In request body
+  session_variable_name: conversation_id  # Custom variable name
   payload_format: simple_session
   fullconversation: false
-  session_timeout: 300  # 5 minutes
+  session_timeout: 300
   llm:
     model: "test"
 ```
 
-**RESTful Session (Session ID in URL):**
+**UUID Format with URL (RESTful):**
 ```yaml
-name: "Pizza Order with RESTful Session"
+name: "Pizza Order with UUID URL"
 base_url: "https://api.example.com"
 auth:
   provider: "noop"
@@ -875,9 +914,11 @@ replicant:
   initial_message: "Hi, I'd like to order a pizza for delivery."
   max_turns: 8
   session_mode: auto
-  payload_format: restful_session  # Session ID goes in URL
+  session_format: uuid  # UUID format
+  session_placement: url  # In URL path
+  payload_format: restful_session
   fullconversation: false
-  # Results in requests to: /conversations/{session_id}/messages
+  # Results in requests to: /conversations/{uuid}/messages
   llm:
     model: "test"
 ```

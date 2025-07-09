@@ -1,0 +1,32 @@
+name: "Session Management - UUID URL"
+base_url: "https://api.example.com"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Get technical support for software"
+  facts:
+    name: "Alex Chen"
+    email: "alex.chen@example.com"
+    software: "DataAnalyzer Pro"
+    version: "3.2.1"
+    issue: "crash on startup"
+    error_code: "ERR_001"
+    os: "macOS 14.0"
+  system_prompt: "You are experiencing technical issues with software. Be patient and provide details when asked."
+  initial_message: "Hello, my software keeps crashing when I start it. I'm getting error code ERR_001."
+  max_turns: 8
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "restful_session"  # RESTful format with session ID in URL
+  session_mode: "auto"  # Auto-generate session ID
+  session_format: "uuid"  # Use UUID format
+  session_placement: "url"  # Place session ID in URL path
+  session_variable_name: "session_id"  # Not used for URL placement
+  session_timeout: 1200  # 20 minutes
+  llm:
+    model: "test"
+    temperature: 0.5
+timeout_seconds: 60
+max_retries: 2
+retry_delay_seconds: 0.5
+validate_politeness: true 

@@ -52,6 +52,19 @@ class SessionMode(str, Enum):
     ENV = "env"  # Use session ID from environment variable
 
 
+class SessionFormat(str, Enum):
+    """Session ID generation formats."""
+    REPLICANTX = "replicantx"  # replicantx_xxxxxxxx format
+    UUID = "uuid"  # Standard UUID format
+
+
+class SessionPlacement(str, Enum):
+    """Where to place the session ID."""
+    HEADER = "header"  # In HTTP headers
+    BODY = "body"  # In request body/payload
+    URL = "url"  # In URL path (RESTful)
+
+
 class LLMConfig(BaseModel):
     """Configuration for LLM using PydanticAI models."""
     model_config = ConfigDict(extra="forbid")
@@ -178,6 +191,9 @@ class ReplicantConfig(BaseModel):
     session_mode: SessionMode = Field(SessionMode.DISABLED, description="Session management mode: 'disabled', 'auto', 'fixed', or 'env'")
     session_id: Optional[str] = Field(None, description="Fixed session ID (used when session_mode is 'fixed')")
     session_timeout: int = Field(300, description="Session timeout in seconds (default: 5 minutes)")
+    session_format: SessionFormat = Field(SessionFormat.UUID, description="Session ID format: 'replicantx' or 'uuid' (default: uuid)")
+    session_placement: SessionPlacement = Field(SessionPlacement.BODY, description="Session ID placement: 'header', 'body', or 'url' (default: body)")
+    session_variable_name: str = Field("session_id", description="Name of the session variable in header/body (default: session_id)")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
 
 

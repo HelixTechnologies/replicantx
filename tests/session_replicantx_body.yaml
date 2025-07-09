@@ -1,0 +1,31 @@
+name: "Session Management - ReplicantX Body"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Order food delivery"
+  facts:
+    name: "Maria Garcia"
+    phone: "+1 555 987 6543"
+    address: "456 Oak Street, Los Angeles, CA 90210"
+    favorite_cuisine: "Mexican"
+    dietary_restrictions: "vegetarian"
+    delivery_instructions: "Leave at front door"
+  system_prompt: "You are ordering food for delivery. Be friendly and provide your details when asked."
+  initial_message: "Hi, I'd like to order some food for delivery. I'm at 456 Oak Street."
+  max_turns: 10
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "simple_session"  # Session-aware simple format
+  session_mode: "auto"  # Auto-generate session ID
+  session_format: "replicantx"  # Use ReplicantX format
+  session_placement: "body"  # Place session ID in body
+  session_variable_name: "conversation_id"  # Custom variable name
+  session_timeout: 600  # 10 minutes
+  llm:
+    model: "test"
+    temperature: 0.6
+timeout_seconds: 90
+max_retries: 2
+retry_delay_seconds: 0.5
+validate_politeness: true 
