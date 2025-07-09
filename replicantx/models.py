@@ -1,18 +1,14 @@
 # Copyright 2025 Helix Technologies Limited
 # Licensed under the Apache License, Version 2.0 (see LICENSE file).
-
 """
-Pydantic v2 models for ReplicantX testing harness.
-
-This module defines all the data structures used throughout the application
-including test scenarios, messages, steps, authentication, and reports.
+Data models for ReplicantX test scenarios and results.
 """
 
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AuthProvider(str, Enum):
@@ -34,6 +30,14 @@ class AssertionType(str, Enum):
     REGEX = "regex"
     EQUALS = "equals"
     NOT_CONTAINS = "not_contains"
+
+
+class PayloadFormat(str, Enum):
+    """Supported API payload formats."""
+    OPENAI = "openai"  # OpenAI chat completion format
+    SIMPLE = "simple"  # Simple message-only format
+    ANTHROPIC = "anthropic"  # Anthropic Claude format
+    LEGACY = "legacy"  # Current ReplicantX format (backward compatibility)
 
 
 class LLMConfig(BaseModel):
@@ -157,6 +161,7 @@ class ReplicantConfig(BaseModel):
         description="Keywords that indicate conversation completion"
     )
     fullconversation: bool = Field(True, description="Whether to send full conversation history (including responses) with each request")
+    payload_format: PayloadFormat = Field(PayloadFormat.OPENAI, description="API payload format: 'openai', 'simple', 'anthropic', or 'legacy'")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
 
 

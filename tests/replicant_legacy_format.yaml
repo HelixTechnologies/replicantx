@@ -1,0 +1,26 @@
+name: "Replicant Agent - Legacy Format Test"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Test legacy ReplicantX payload format"
+  facts:
+    name: "Test User"
+    email: "test@example.com"
+    preference: "legacy format"
+  system_prompt: |
+    You are a test user working with a legacy API.
+    Keep responses brief and to the point.
+  initial_message: "Hello, I'm testing the legacy payload format."
+  max_turns: 3
+  completion_keywords: 
+    - "test complete"
+    - "finished"
+    - "done"
+  fullconversation: true
+  payload_format: legacy  # Legacy ReplicantX format (backward compatibility)
+  llm:
+    model: "test"
+    temperature: 0.5
+    max_tokens: 100 

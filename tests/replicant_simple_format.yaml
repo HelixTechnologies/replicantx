@@ -1,0 +1,26 @@
+name: "Replicant Agent - Simple Format Test"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Test simple message-only payload format"
+  facts:
+    name: "Test User"
+    email: "test@example.com"
+    preference: "simple format"
+  system_prompt: |
+    You are a test user working with a simple API.
+    Keep responses brief and to the point.
+  initial_message: "Hello, I'm testing the simple payload format."
+  max_turns: 3
+  completion_keywords: 
+    - "test complete"
+    - "finished"
+    - "done"
+  fullconversation: false  # Not needed for simple format
+  payload_format: simple  # Simple message-only format
+  llm:
+    model: "test"
+    temperature: 0.5
+    max_tokens: 100 

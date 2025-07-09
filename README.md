@@ -581,6 +581,151 @@ replicant:
 - 🔧 **Legacy APIs**: Compatible with APIs expecting limited context
 - 🔧 **Memory Constraints**: When API has payload size limitations
 
+### API Payload Format Configuration
+ReplicantX supports multiple API payload formats for maximum compatibility with any conversational API:
+
+#### OpenAI Format (`payload_format: openai`) - **Default**
+Industry-standard OpenAI chat completion format:
+```yaml
+replicant:
+  payload_format: openai  # Default behavior
+```
+
+**Payload Structure:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi there!"},
+    {"role": "user", "content": "How are you?"}
+  ]
+}
+```
+
+**Best For:**
+- ✅ **OpenAI APIs** and compatible services
+- ✅ **Industry standard** - widely supported
+- ✅ **Full conversation context** with message arrays
+- ✅ **Modern conversational AI** platforms
+
+#### Simple Format (`payload_format: simple`)
+Minimal message-only format for basic APIs:
+```yaml
+replicant:
+  payload_format: simple
+```
+
+**Payload Structure:**
+```json
+{
+  "message": "Hello, how are you?"
+}
+```
+
+**Best For:**
+- ✅ **Simple APIs** that only need the current message
+- ✅ **Performance-critical** scenarios
+- ✅ **Legacy systems** with minimal payload requirements
+- ✅ **Testing basic functionality** without conversation context
+
+#### Anthropic Format (`payload_format: anthropic`)
+Anthropic Claude-compatible format:
+```yaml
+replicant:
+  payload_format: anthropic
+```
+
+**Payload Structure:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi there!"}
+  ]
+}
+```
+
+**Best For:**
+- ✅ **Anthropic Claude APIs** and compatible services
+- ✅ **Claude-based applications** and integrations
+- ✅ **Conversational AI** platforms using Claude models
+
+#### Legacy Format (`payload_format: legacy`)
+Original ReplicantX format for backward compatibility:
+```yaml
+replicant:
+  payload_format: legacy
+```
+
+**Payload Structure:**
+```json
+{
+  "message": "Hello, how are you?",
+  "timestamp": "2025-07-09T10:30:00",
+  "conversation_history": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi there!"}
+  ]
+}
+```
+
+**Best For:**
+- 🔧 **Existing ReplicantX integrations** (backward compatibility)
+- 🔧 **Custom APIs** expecting the original format
+- 🔧 **Migration scenarios** when transitioning to new formats
+
+### Complete Configuration Example
+```yaml
+name: "Universal API Test"
+base_url: https://api.example.com/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Test API with OpenAI-compatible format"
+  facts:
+    name: "Test User"
+    email: "test@example.com"
+  system_prompt: |
+    You are a helpful user testing an API.
+  initial_message: "Hello, I'm testing the API."
+  max_turns: 10
+  completion_keywords: ["complete", "finished", "done"]
+  fullconversation: true  # Send full conversation history
+  payload_format: openai  # Use OpenAI-compatible format
+  llm:
+    model: "test"
+    temperature: 0.7
+    max_tokens: 150
+```
+
+### Migration Guide
+
+**From Legacy to OpenAI Format:**
+```yaml
+# Old configuration (still works)
+replicant:
+  payload_format: legacy  # or omit entirely
+
+# New recommended configuration
+replicant:
+  payload_format: openai  # More compatible with modern APIs
+```
+
+**For Simple APIs:**
+```yaml
+replicant:
+  payload_format: simple
+  fullconversation: false  # Not needed for simple format
+```
+
+**For Anthropic APIs:**
+```yaml
+replicant:
+  payload_format: anthropic
+  fullconversation: true  # Maintain conversation context
+```
+
 ### System Prompt Examples
 
 **Helpful User:**
@@ -747,6 +892,7 @@ replicant:
   max_turns: 12
   completion_keywords: ["resolved", "ticket created", "issue closed"]
   fullconversation: true  # Send full conversation history with each request
+  payload_format: openai  # Use OpenAI-compatible format
   llm:
     model: "openai:gpt-4o"  # PydanticAI model string
     temperature: 0.8
@@ -784,10 +930,12 @@ replicant:
   max_turns: 15
   completion_keywords: ["booked", "confirmed", "reservation number", "booking complete"]
   fullconversation: true  # Send full conversation history with each request
+  payload_format: openai  # Use OpenAI-compatible format
   llm:
     model: "openai:gpt-4o"
     temperature: 0.7
     max_tokens: 150
+```
 
 
 These examples enable much more natural and contextually aware conversations compared to rule-based responses.

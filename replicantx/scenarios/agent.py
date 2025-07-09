@@ -18,6 +18,7 @@ from ..models import (
     AssertionType, AuthProvider, Message
 )
 from ..tools.http_client import HTTPClient, HTTPResponse
+from ..tools.payload_formatter import PayloadFormatter
 from .replicant import ReplicantAgent
 from rich.console import Console
 
@@ -380,31 +381,27 @@ class AgentScenarioRunner:
         Returns:
             HTTP response
         """
-        # Prepare request payload
-        # Include conversation history for context
+        # Prepare conversation history based on fullconversation setting
         conversation_history = []
         if self.replicant_agent:
             if self.config.replicant.fullconversation:
                 # Send full conversation history including responses
-                conversation_history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in self.replicant_agent.state.conversation_history
-                ]
+                conversation_history = self.replicant_agent.state.conversation_history
             else:
                 # Send only last 10 messages (legacy behavior)
-                conversation_history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in self.replicant_agent.state.conversation_history[-10:]
-                ]
+                conversation_history = self.replicant_agent.state.conversation_history[-10:]
         
-        payload = {
-            "message": user_message,
-            "timestamp": datetime.now().isoformat(),
-            "conversation_history": conversation_history
-        }
+        # Format payload using the configured format
+        payload = PayloadFormatter.format_payload(
+            user_message=user_message,
+            conversation_history=conversation_history,
+            payload_format=self.config.replicant.payload_format,
+            timestamp=datetime.now()
+        )
         
         self._debug_log("HTTP request payload", {
-            "message": user_message,
+            "user_message": user_message,
+            "payload_format": self.config.replicant.payload_format.value,
             "conversation_history_length": len(conversation_history),
             "payload_size": f"{len(str(payload))} chars",
             "full_payload": str(payload) if len(str(payload)) < 500 else f"{str(payload)[:500]}..."

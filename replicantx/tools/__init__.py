@@ -4,12 +4,14 @@
 Tools and utilities for ReplicantX.
 
 This module provides utility classes and functions including
-HTTP client wrappers and other helper tools.
+HTTP client wrappers, payload formatters, and other helper tools.
 """
 
 from .http_client import HTTPClient, HTTPResponse
+from .payload_formatter import PayloadFormatter
 
 __all__ = [
     "HTTPClient",
     "HTTPResponse",
+    "PayloadFormatter",
 ] 

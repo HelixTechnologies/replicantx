@@ -1,0 +1,26 @@
+name: "Replicant Agent - OpenAI Format Test"
+base_url: https://{{ env.REPLICANTX_TARGET }}/api/chat
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Test OpenAI-compatible payload format"
+  facts:
+    name: "Test User"
+    email: "test@example.com"
+    preference: "OpenAI format"
+  system_prompt: |
+    You are a test user working with an OpenAI-compatible API.
+    Keep responses brief and to the point.
+  initial_message: "Hello, I'm testing the OpenAI payload format."
+  max_turns: 3
+  completion_keywords: 
+    - "test complete"
+    - "finished"
+    - "done"
+  fullconversation: true
+  payload_format: openai  # OpenAI chat completion format
+  llm:
+    model: "test"
+    temperature: 0.5
+    max_tokens: 100 
