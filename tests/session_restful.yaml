@@ -1,0 +1,28 @@
+name: "Session Management - RESTful"
+base_url: "https://api.example.com"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Order a pizza for delivery"
+  facts:
+    name: "Mike Rodriguez"
+    phone: "+1 555 123 4567"
+    address: "123 Main Street, Apt 4B, New York, NY 10001"
+    payment_method: "credit card ending in 1234"
+    favorite_toppings: ["pepperoni", "mushrooms"]
+    delivery_instructions: "Ring doorbell twice"
+  system_prompt: "You are Mike Rodriguez, ordering a pizza for delivery. Be friendly and provide your details when asked."
+  initial_message: "Hi, I'd like to order a pizza for delivery. I'm at 123 Main Street, Apt 4B."
+  max_turns: 10
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "restful_session"  # RESTful format with session ID in URL
+  session_mode: "auto"  # Auto-generate session ID
+  session_timeout: 900  # 15 minutes
+  llm:
+    model: "test"
+    temperature: 0.6
+timeout_seconds: 90
+max_retries: 2
+retry_delay_seconds: 0.5
+validate_politeness: true 

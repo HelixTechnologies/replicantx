@@ -38,6 +38,18 @@ class PayloadFormat(str, Enum):
     SIMPLE = "simple"  # Simple message-only format
     ANTHROPIC = "anthropic"  # Anthropic Claude format
     LEGACY = "legacy"  # Current ReplicantX format (backward compatibility)
+    # Session-aware formats
+    OPENAI_SESSION = "openai_session"  # OpenAI format with session ID
+    SIMPLE_SESSION = "simple_session"  # Simple format with session ID
+    RESTFUL_SESSION = "restful_session"  # RESTful resource format
+
+
+class SessionMode(str, Enum):
+    """Session management modes."""
+    DISABLED = "disabled"  # No session management (legacy behavior)
+    AUTO = "auto"  # Auto-generate session ID
+    FIXED = "fixed"  # Use fixed session ID from config
+    ENV = "env"  # Use session ID from environment variable
 
 
 class LLMConfig(BaseModel):
@@ -161,7 +173,11 @@ class ReplicantConfig(BaseModel):
         description="Keywords that indicate conversation completion"
     )
     fullconversation: bool = Field(True, description="Whether to send full conversation history (including responses) with each request")
-    payload_format: PayloadFormat = Field(PayloadFormat.OPENAI, description="API payload format: 'openai', 'simple', 'anthropic', or 'legacy'")
+    payload_format: PayloadFormat = Field(PayloadFormat.OPENAI, description="API payload format: 'openai', 'simple', 'anthropic', 'legacy', or session-aware formats")
+    # Session management configuration
+    session_mode: SessionMode = Field(SessionMode.DISABLED, description="Session management mode: 'disabled', 'auto', 'fixed', or 'env'")
+    session_id: Optional[str] = Field(None, description="Fixed session ID (used when session_mode is 'fixed')")
+    session_timeout: int = Field(300, description="Session timeout in seconds (default: 5 minutes)")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
 
 

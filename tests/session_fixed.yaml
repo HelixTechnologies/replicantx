@@ -1,0 +1,30 @@
+name: "Session Management - Fixed ID"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Get customer support for a billing issue"
+  facts:
+    name: "Sarah Chen"
+    email: "sarah.chen@example.com"
+    account_id: "ACC-789456"
+    issue_type: "billing"
+    subscription_plan: "premium"
+    last_payment_date: "2024-01-15"
+    amount_charged: "$29.99"
+  system_prompt: "You are Sarah Chen, a customer with a billing issue. Be polite but firm about getting the issue resolved."
+  initial_message: "Hello, I have a billing question. I was charged $29.99 on January 15th but I don't see the charge on my statement."
+  max_turns: 12
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "simple_session"  # Session-aware simple format
+  session_mode: "fixed"  # Use fixed session ID
+  session_id: "test_session_12345"  # Fixed session ID
+  session_timeout: 300  # 5 minutes
+  llm:
+    model: "test"
+    temperature: 0.5
+timeout_seconds: 120
+max_retries: 2
+retry_delay_seconds: 1.0
+validate_politeness: true 

@@ -1,0 +1,30 @@
+name: "Session Management - Auto Generated"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Book a flight from London to Paris for next Friday"
+  facts:
+    name: "Alex Johnson"
+    email: "alex.johnson@example.com"
+    phone: "+44 20 7946 0958"
+    departure_city: "London"
+    destination_city: "Paris"
+    travel_date: "next Friday"
+    preferred_time: "morning"
+    budget: "£200"
+  system_prompt: "You are Alex Johnson, a business traveler who needs to book a flight. Be polite and provide your details when asked."
+  initial_message: "Hi, I need to book a flight from London to Paris for next Friday. I'd prefer a morning flight if possible."
+  max_turns: 15
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "openai_session"  # Session-aware OpenAI format
+  session_mode: "auto"  # Auto-generate session ID
+  session_timeout: 600  # 10 minutes
+  llm:
+    model: "test"
+    temperature: 0.7
+timeout_seconds: 180
+max_retries: 3
+retry_delay_seconds: 1.0
+validate_politeness: true 

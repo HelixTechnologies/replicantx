@@ -1,0 +1,28 @@
+name: "Session Management - Environment"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Get technical support for software issue"
+  facts:
+    name: "David Wilson"
+    email: "david.wilson@example.com"
+    software: "ProjectManager Pro"
+    version: "2.1.0"
+    issue: "login problems"
+    error_message: "Invalid credentials"
+  system_prompt: "You are a user experiencing technical issues with software. Be patient and provide details when asked."
+  initial_message: "Hello, I'm having trouble logging into my software. I keep getting an 'Invalid credentials' error."
+  max_turns: 8
+  fullconversation: false  # Use session management instead of full conversation
+  payload_format: "openai_session"  # Session-aware OpenAI format
+  session_mode: "env"  # Use session ID from environment variable
+  session_timeout: 180  # 3 minutes
+  llm:
+    model: "test"
+    temperature: 0.6
+timeout_seconds: 60
+max_retries: 2
+retry_delay_seconds: 0.5
+validate_politeness: true 

@@ -19,6 +19,7 @@ from ..models import (
 )
 from ..tools.http_client import HTTPClient, HTTPResponse
 from ..tools.payload_formatter import PayloadFormatter
+from ..tools.session_manager import SessionManager
 from .replicant import ReplicantAgent
 from rich.console import Console
 
@@ -41,6 +42,15 @@ class AgentScenarioRunner:
         self.auth_provider = self._create_auth_provider()
         self.http_client: Optional[HTTPClient] = None
         self.replicant_agent: Optional[ReplicantAgent] = None
+        
+        # Initialize session manager if replicant config is available
+        self.session_manager: Optional[SessionManager] = None
+        if self.config.replicant:
+            self.session_manager = SessionManager(
+                session_mode=self.config.replicant.session_mode,
+                session_id=self.config.replicant.session_id,
+                timeout_seconds=self.config.replicant.session_timeout
+            )
     
     def _create_auth_provider(self) -> AuthBase:
         """Create authentication provider based on configuration.
@@ -147,6 +157,15 @@ class AgentScenarioRunner:
             "max_tokens": self.config.replicant.llm.max_tokens,
             "max_turns": self.config.replicant.max_turns
         })
+        
+        # Log session management information
+        if self.session_manager:
+            session_info = self.session_manager.get_session_info()
+            self._debug_log("Session Manager initialized", session_info)
+            
+            if self.watch and self.session_manager.is_enabled():
+                self._watch_log(f"🔗 Session ID: {self.session_manager.session_id}")
+                self._watch_log(f"⏰ Session timeout: {self.session_manager.timeout_seconds}s")
         
         # Initialize watch mode
         if self.watch:
@@ -396,7 +415,15 @@ class AgentScenarioRunner:
             user_message=user_message,
             conversation_history=conversation_history,
             payload_format=self.config.replicant.payload_format,
+            session_manager=self.session_manager,
             timestamp=datetime.now()
+        )
+        
+        # Get the appropriate URL for session-aware requests
+        request_url = PayloadFormatter.get_session_url(
+            base_url=self.config.base_url,
+            session_manager=self.session_manager,
+            payload_format=self.config.replicant.payload_format
         )
         
         self._debug_log("HTTP request payload", {
@@ -404,12 +431,15 @@ class AgentScenarioRunner:
             "payload_format": self.config.replicant.payload_format.value,
             "conversation_history_length": len(conversation_history),
             "payload_size": f"{len(str(payload))} chars",
+            "request_url": request_url,
+            "session_enabled": self.session_manager.is_enabled() if self.session_manager else False,
+            "session_id": self.session_manager.session_id if self.session_manager else None,
             "full_payload": str(payload) if len(str(payload)) < 500 else f"{str(payload)[:500]}..."
         })
         
         # Make POST request to the API
         response = await self.http_client.post(
-            url="",  # Use base URL
+            url=request_url.replace(self.config.base_url, ""),  # Remove base URL for relative path
             json=payload,
             max_retries=self.config.max_retries,
         )

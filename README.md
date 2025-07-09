@@ -674,6 +674,112 @@ replicant:
 - 🔧 **Custom APIs** expecting the original format
 - 🔧 **Migration scenarios** when transitioning to new formats
 
+#### Session Management
+
+ReplicantX supports session management to maintain conversation state across multiple API requests without sending the full conversation history each time. This is more efficient and realistic for production APIs.
+
+##### Session Modes
+
+```yaml
+replicant:
+  # Session management configuration
+  session_mode: auto  # disabled, auto, fixed, or env
+  session_id: null  # Required when session_mode is "fixed"
+  session_timeout: 300  # Session timeout in seconds (default: 5 minutes)
+  
+  # Session-aware payload formats
+  payload_format: openai_session  # openai_session, simple_session, restful_session
+  fullconversation: false  # Disable when using session management
+```
+
+**Session Modes:**
+- `disabled` (default): No session management, uses full conversation history
+- `auto`: Auto-generate unique session ID for each test run
+- `fixed`: Use a specific session ID (requires `session_id` field)
+- `env`: Use session ID from `REPLICANTX_SESSION_ID` environment variable
+
+**Session-Aware Payload Formats:**
+- `openai_session`: `{"session_id": "...", "message": "..."}`
+- `simple_session`: `{"conversation_id": "...", "message": "..."}`
+- `restful_session`: `{"message": "..."}` (session ID in URL path)
+
+##### Example Configurations
+
+**Auto-Generated Session:**
+```yaml
+replicant:
+  session_mode: auto
+  payload_format: openai_session
+  fullconversation: false
+  session_timeout: 600  # 10 minutes
+```
+
+**Fixed Session ID:**
+```yaml
+replicant:
+  session_mode: fixed
+  session_id: "test_session_12345"
+  payload_format: simple_session
+  fullconversation: false
+```
+
+**RESTful Session (Session ID in URL):**
+```yaml
+replicant:
+  session_mode: auto
+  payload_format: restful_session
+  fullconversation: false
+# Results in requests to: /conversations/{session_id}/messages
+```
+
+**Environment-Based Session:**
+```bash
+# Set environment variable
+export REPLICANTX_SESSION_ID="prod_session_abc123"
+
+# Use in YAML
+replicant:
+  session_mode: env
+  payload_format: openai_session
+  fullconversation: false
+```
+
+##### Session Management Benefits
+
+**✅ Efficiency:**
+- Reduces payload size significantly
+- Faster API requests
+- Lower bandwidth usage
+
+**✅ Realistic Testing:**
+- Matches production API patterns
+- Tests session handling logic
+- Validates conversation continuity
+
+**✅ Flexibility:**
+- Multiple session ID strategies
+- Configurable timeouts
+- Different payload formats
+
+**✅ Debugging:**
+- Session information in debug logs
+- Session lifecycle tracking
+- Timeout monitoring
+
+##### When to Use Session Management
+
+**Use session management when:**
+- ✅ Your API supports conversation IDs
+- ✅ You want to test session handling
+- ✅ Payload size is a concern
+- ✅ Testing production-like scenarios
+
+**Use full conversation when:**
+- ❌ API doesn't support sessions
+- ❌ Testing legacy endpoints
+- ❌ Need complete conversation context
+- ❌ Debugging conversation flow
+
 ### Complete Configuration Example
 ```yaml
 name: "Universal API Test"
@@ -697,6 +803,83 @@ replicant:
     model: "test"
     temperature: 0.7
     max_tokens: 150
+```
+
+### Session Management Examples
+
+**Auto-Generated Session (Recommended):**
+```yaml
+name: "Flight Booking with Session"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Book a flight from London to Paris"
+  facts:
+    name: "Alex Johnson"
+    email: "alex@example.com"
+    departure: "London"
+    destination: "Paris"
+    date: "next Friday"
+  system_prompt: "You are a customer booking a flight. Be polite and provide details when asked."
+  initial_message: "Hi, I need to book a flight from London to Paris for next Friday."
+  max_turns: 15
+  session_mode: auto  # Auto-generate session ID
+  payload_format: openai_session  # Session-aware format
+  fullconversation: false  # Use session instead of full conversation
+  session_timeout: 600  # 10 minutes
+  llm:
+    model: "test"
+```
+
+**Fixed Session ID (For Testing):**
+```yaml
+name: "Customer Support with Fixed Session"
+base_url: "https://api.example.com/support"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Get help with billing issue"
+  facts:
+    name: "Sarah Chen"
+    account_id: "ACC-789456"
+    issue: "billing"
+  system_prompt: "You are a customer with a billing question."
+  initial_message: "Hello, I have a billing question."
+  max_turns: 10
+  session_mode: fixed
+  session_id: "test_session_12345"  # Fixed session ID
+  payload_format: simple_session
+  fullconversation: false
+  session_timeout: 300  # 5 minutes
+  llm:
+    model: "test"
+```
+
+**RESTful Session (Session ID in URL):**
+```yaml
+name: "Pizza Order with RESTful Session"
+base_url: "https://api.example.com"
+auth:
+  provider: "noop"
+level: "agent"
+replicant:
+  goal: "Order a pizza for delivery"
+  facts:
+    name: "Mike Rodriguez"
+    address: "123 Main St, NYC"
+    phone: "+1 555 123 4567"
+  system_prompt: "You are ordering a pizza. Be friendly and provide your details."
+  initial_message: "Hi, I'd like to order a pizza for delivery."
+  max_turns: 8
+  session_mode: auto
+  payload_format: restful_session  # Session ID goes in URL
+  fullconversation: false
+  # Results in requests to: /conversations/{session_id}/messages
+  llm:
+    model: "test"
 ```
 
 ### Migration Guide
