@@ -62,8 +62,14 @@ class ResponseGenerator(BaseModel):
             Generated response
         """
         try:
+            # Get current date and time
+            current_datetime = datetime.now()
+            date_str = current_datetime.strftime("%A, %B %d, %Y")
+            time_str = current_datetime.strftime("%I:%M %p %Z")
+            
             # Prepare context with facts AND conversation history
-            context = f"Available facts: {json.dumps(self.facts, indent=2)}\n\n"
+            context = f"Current date and time: {date_str} at {time_str}\n\n"
+            context += f"Available facts: {json.dumps(self.facts, indent=2)}\n\n"
             
             # Add conversation history for context
             if conversation_state.conversation_history:
@@ -74,7 +80,8 @@ class ResponseGenerator(BaseModel):
             
             context += f"Current API message: {api_message}\n\n"
             context += "Please generate a natural response as a user working toward your goal. "
-            context += "Use the available facts when appropriate, and respond naturally to the API's question or statement."
+            context += "Use the available facts when appropriate, and respond naturally to the API's question or statement. "
+            context += "You know the current date and time, so you can reference it when relevant to the conversation."
             
             # Create and use PydanticAI agent
             agent = self._create_agent()

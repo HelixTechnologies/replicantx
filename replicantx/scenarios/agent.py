@@ -149,7 +149,13 @@ class AgentScenarioRunner:
         # Initialize Replicant agent
         self.replicant_agent = ReplicantAgent.create(self.config.replicant)
         
+        current_datetime = datetime.now()
+        date_str = current_datetime.strftime("%A, %B %d, %Y")
+        time_str = current_datetime.strftime("%I:%M %p %Z")
+        
         self._debug_log("Replicant Agent initialized", {
+            "current_date": date_str,
+            "current_time": time_str,
             "goal": self.config.replicant.goal,
             "facts_count": len(self.config.replicant.facts),
             "facts": str(self.config.replicant.facts),
@@ -174,7 +180,13 @@ class AgentScenarioRunner:
         
         # Initialize watch mode
         if self.watch:
+            current_datetime = datetime.now()
+            date_str = current_datetime.strftime("%A, %B %d, %Y")
+            time_str = current_datetime.strftime("%I:%M %p %Z")
+            
             self._watch_log("👥 [bold green]LIVE CONVERSATION[/bold green] - Starting agent scenario")
+            self._watch_log(f"📅 Date: {date_str}")
+            self._watch_log(f"🕐 Time: {time_str}")
             self._watch_log(f"🎯 Goal: {self.config.replicant.goal}")
             self._watch_log(f"📝 Facts: {len(self.config.replicant.facts)} items available")
             self._watch_log("")
