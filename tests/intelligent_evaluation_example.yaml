@@ -1,0 +1,73 @@
+# Example demonstrating intelligent goal evaluation
+# This file shows how to avoid false positives with LLM-powered evaluation
+
+name: "Intelligent Goal Evaluation - Customer Support Example"
+base_url: "https://api.example.com/support"
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Get help resolving a billing dispute"
+  facts:
+    name: "Alex Chen"
+    account_number: "ACC-789456"
+    email: "alex.chen@email.com"
+    phone: "+1-555-9876"
+    issue_type: "billing_dispute"
+    disputed_charge: "$149.99 charged on March 15th"
+    expected_charge: "$99.99 monthly subscription"
+    account_type: "Premium"
+  system_prompt: |
+    You are a customer named Alex Chen who needs help with a billing dispute.
+    You notice an incorrect charge on your account and want it resolved.
+    You're polite but want a clear resolution. Provide information from your 
+    facts when asked, but don't volunteer everything at once.
+  initial_message: "Hello, I have a billing issue I need help with."
+  max_turns: 12
+  
+  # Traditional keywords that could cause false positives
+  completion_keywords:
+    - "resolved"
+    - "refund"
+    - "credited"
+    - "ticket created"
+    - "issue closed"
+  
+  # Intelligent evaluation that understands context
+  goal_evaluation_mode: "intelligent"
+  goal_evaluation_model: "openai:gpt-4o-mini"  # Cost-effective evaluation model
+  goal_evaluation_prompt: |
+    Evaluate if the billing dispute has been truly resolved. Look for:
+    
+    ACHIEVED indicators:
+    ✅ Confirmed refund processed or account credited
+    ✅ Ticket resolution with reference number
+    ✅ Billing correction acknowledged and completed
+    ✅ Customer satisfaction confirmed
+    
+    NOT ACHIEVED indicators:
+    ❌ "I'll look into the refund" (promise, not completion)
+    ❌ "A ticket has been created" (process started, not resolved)
+    ❌ "The issue should be resolved soon" (future promise)
+    ❌ "Let me transfer you for the refund" (escalation, not resolution)
+    
+    Examples of false positives to avoid:
+    ❌ "I'll make sure this is resolved" ≠ actual resolution
+    ❌ "Your refund will be processed" ≠ refund completed
+    ❌ "I've created a ticket for this issue" ≠ issue resolved
+    
+    Goal: {goal}
+    User Facts: {facts}
+    Recent Conversation: {conversation}
+    
+    RESULT: [ACHIEVED or NOT_ACHIEVED]
+    CONFIDENCE: [0.0 to 1.0]
+    REASONING: [Explain why the goal is/isn't achieved]
+  
+  fullconversation: true  # Send full conversation history for context
+  payload_format: openai  # Use standard format
+  
+  llm:
+    model: "openai:gpt-4o"  # Main conversation model
+    temperature: 0.8
+    max_tokens: 120 

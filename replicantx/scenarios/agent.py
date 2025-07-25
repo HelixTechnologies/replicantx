@@ -203,17 +203,8 @@ class AgentScenarioRunner:
             
             self._watch_log(f"👤 [bold cyan]User:[/bold cyan] {current_message}")
             
-            # Record initial message in conversation history
-            from ..models import Message
-            initial_message = Message(
-                role="user",
-                content=current_message,
-                timestamp=datetime.now()
-            )
-            self.replicant_agent.state.conversation_history.append(initial_message)
-            
             # Continue conversation until completion or limits reached
-            while self.replicant_agent.should_continue_conversation():
+            while await self.replicant_agent.should_continue_conversation():
                 self._debug_log(f"Executing conversation step {step_index + 1}", {
                     "user_message": current_message,
                     "turn_count": self.replicant_agent.state.turn_count,
@@ -266,7 +257,9 @@ class AgentScenarioRunner:
                         "parsed_response": parsed_response
                     })
                     
-                    current_message = await self.replicant_agent.process_api_response(parsed_response)
+                    # For the first response, pass the triggering message to add to conversation history
+                    triggering_message = current_message if step_index == 0 else None
+                    current_message = await self.replicant_agent.process_api_response(parsed_response, triggering_message)
                     
                     self._debug_log("Generated next user message", {
                         "next_message": current_message,
@@ -309,6 +302,17 @@ class AgentScenarioRunner:
                 self._watch_log(f"🎯 Goal achieved: {'Yes' if conversation_summary.get('goal_achieved', False) else 'No'}")
                 self._watch_log(f"📝 Facts used: {conversation_summary.get('facts_used', 0)}")
                 self._watch_log(f"💬 Total turns: {conversation_summary.get('total_turns', 0)}")
+                
+                # Add goal evaluation details if available
+                if 'goal_evaluation_method' in conversation_summary:
+                    method = conversation_summary.get('goal_evaluation_method', 'unknown')
+                    confidence = conversation_summary.get('goal_evaluation_confidence', 0.0)
+                    fallback = conversation_summary.get('goal_evaluation_fallback_used', False)
+                    reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
+                    
+                    self._watch_log(f"🧠 Evaluation method: {method}" + (" (fallback used)" if fallback else ""))
+                    self._watch_log(f"📊 Confidence: {confidence:.2f}")
+                    self._watch_log(f"💭 Reasoning: {reasoning}")
             
             self._debug_log("Scenario completed successfully", {
                 "passed": report.passed,

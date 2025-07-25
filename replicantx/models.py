@@ -65,6 +65,13 @@ class SessionPlacement(str, Enum):
     URL = "url"  # In URL path (RESTful)
 
 
+class GoalEvaluationMode(str, Enum):
+    """Goal evaluation modes."""
+    KEYWORDS = "keywords"  # Simple keyword matching (legacy behavior)
+    INTELLIGENT = "intelligent"  # LLM-based goal evaluation
+    HYBRID = "hybrid"  # LLM with keyword fallback
+
+
 class LLMConfig(BaseModel):
     """Configuration for LLM using PydanticAI models."""
     model_config = ConfigDict(extra="forbid")
@@ -88,6 +95,18 @@ class Message(BaseModel):
     content: str = Field(..., description="Content of the message")
     timestamp: datetime = Field(default_factory=datetime.now, description="When message was sent")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class GoalEvaluationResult(BaseModel):
+    """Result of goal evaluation."""
+    model_config = ConfigDict(extra="forbid")
+    
+    goal_achieved: bool = Field(..., description="Whether the goal has been achieved")
+    confidence: float = Field(..., description="Confidence score from 0.0 to 1.0")
+    reasoning: str = Field(..., description="Explanation of why the goal is/isn't achieved")
+    evaluation_method: str = Field(..., description="Method used: 'keywords', 'intelligent', or 'hybrid'")
+    fallback_used: bool = Field(False, description="Whether hybrid mode fell back to keywords")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When evaluation was performed")
 
 
 class AssertionResult(BaseModel):
@@ -195,6 +214,11 @@ class ReplicantConfig(BaseModel):
     session_placement: SessionPlacement = Field(SessionPlacement.BODY, description="Session ID placement: 'header', 'body', or 'url' (default: body)")
     session_variable_name: str = Field("session_id", description="Name of the session variable in header/body (default: session_id)")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
+    
+    # Goal evaluation configuration
+    goal_evaluation_mode: GoalEvaluationMode = Field(GoalEvaluationMode.KEYWORDS, description="Goal evaluation mode: 'keywords' (default), 'intelligent', or 'hybrid'")
+    goal_evaluation_model: Optional[str] = Field(None, description="PydanticAI model for goal evaluation (defaults to main LLM model if not specified)")
+    goal_evaluation_prompt: Optional[str] = Field(None, description="Custom prompt for goal evaluation (uses default if not specified)")
 
 
 class ScenarioConfig(BaseModel):
