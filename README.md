@@ -973,6 +973,200 @@ system_prompt: |
   information when asked but expect efficient service.
 ```
 
+## 🎯 Goal Evaluation Modes
+
+ReplicantX provides intelligent goal evaluation to accurately determine when conversation objectives have been achieved, solving the common problem of false positives with simple keyword matching.
+
+### The Problem with Keywords
+
+Traditional keyword-based completion detection can produce false positives:
+
+```yaml
+# Problematic scenario
+completion_keywords: ["confirmed", "booked"]
+
+# False positive examples:
+# ❌ "I'll let you know when your booking has been confirmed" (contains "confirmed")
+# ❌ "Have you booked with us before?" (contains "booked") 
+# ❌ "Your booking confirmation is pending" (contains "booking")
+```
+
+### Three Evaluation Modes
+
+#### 1. **Keywords Mode** (Default - Backwards Compatible)
+Simple substring matching - the original behavior:
+
+```yaml
+replicant:
+  goal: "Book a flight to Paris"
+  goal_evaluation_mode: "keywords"  # Default
+  completion_keywords: ["confirmed", "booked", "reservation number"]
+```
+
+**Use when:**
+- ✅ Maintaining existing test compatibility
+- ✅ Simple scenarios with clear completion signals
+- ✅ Performance is critical (no LLM calls)
+
+#### 2. **Intelligent Mode** (Recommended)
+LLM-powered analysis that understands context and intent:
+
+```yaml
+replicant:
+  goal: "Book a business class flight to Paris"
+  goal_evaluation_mode: "intelligent"
+  goal_evaluation_model: "openai:gpt-4o-mini"  # Optional: separate model for evaluation
+  completion_keywords: ["confirmed", "booked"]  # Still required for compatibility
+```
+
+**Benefits:**
+- ✅ **Context-aware**: Distinguishes promises from accomplishments
+- ✅ **False positive reduction**: "I'll confirm later" ≠ "Your booking is confirmed"
+- ✅ **Intent understanding**: Recognizes goal completion without exact keywords
+- ✅ **Reasoning provided**: Detailed explanation of evaluation decisions
+
+#### 3. **Hybrid Mode** (Best of Both Worlds)
+Attempts LLM evaluation first, falls back to keywords if uncertain:
+
+```yaml
+replicant:
+  goal: "Get help with billing issue"
+  goal_evaluation_mode: "hybrid"
+  goal_evaluation_model: "openai:gpt-4o-mini"
+  completion_keywords: ["resolved", "ticket created", "issue closed"]
+```
+
+**Benefits:**
+- ✅ **Smart evaluation** when LLM is confident
+- ✅ **Reliable fallback** when LLM is uncertain
+- ✅ **Cost-effective** for mixed scenarios
+- ✅ **Production-ready** with built-in safety net
+
+### Custom Evaluation Prompts
+
+For domain-specific scenarios, customize the evaluation logic:
+
+```yaml
+replicant:
+  goal: "Complete a customer support ticket"
+  goal_evaluation_mode: "intelligent"
+  goal_evaluation_prompt: |
+    Evaluate if the customer support goal is achieved. Look for:
+    1. Issue resolution confirmation from the agent
+    2. Ticket number or reference provided
+    3. Customer satisfaction or acknowledgment
+    4. Clear closure statements
+    
+    Goal: {goal}
+    User Facts: {facts}
+    Recent Conversation: {conversation}
+    
+    Respond exactly:
+    RESULT: [ACHIEVED or NOT_ACHIEVED]
+    CONFIDENCE: [0.0 to 1.0]
+    REASONING: [Brief explanation]
+  completion_keywords: ["resolved", "ticket created"]
+```
+
+### Example: Flight Booking with Intelligent Evaluation
+
+```yaml
+name: "Smart Flight Booking Test"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: noop
+level: agent
+replicant:
+  goal: "Book a round-trip business class flight to Paris"
+  facts:
+    name: "Sarah Johnson"
+    email: "sarah@example.com"
+    travel_class: "business"
+    destination: "Paris"
+    departure_city: "New York"
+    travel_date: "next Friday"
+    return_date: "following Monday"
+    budget: "$3000"
+  system_prompt: |
+    You are a customer booking a flight. Provide information when asked
+    but don't volunteer everything upfront. Be conversational and natural.
+  initial_message: "Hi, I'd like to book a flight to Paris."
+  max_turns: 15
+  
+  # Intelligent goal evaluation
+  goal_evaluation_mode: "intelligent"
+  goal_evaluation_model: "openai:gpt-4o-mini"  # Fast, cost-effective model
+  
+  # Still needed for fallback/compatibility  
+  completion_keywords: ["booked", "confirmed", "reservation number"]
+  
+  llm:
+    model: "openai:gpt-4o"
+    temperature: 0.7
+    max_tokens: 150
+```
+
+### Evaluation Results in Reports
+
+The watch mode now shows detailed evaluation information:
+
+```bash
+📊 CONVERSATION COMPLETE
+🏁 Status: ✅ SUCCESS
+🎯 Goal achieved: Yes
+🧠 Evaluation method: intelligent
+📊 Confidence: 0.89
+💭 Reasoning: The flight has been successfully booked with confirmation number ABC123 provided
+```
+
+### Migration Strategy
+
+**Phase 1: Test Intelligent Mode**
+```yaml
+# Update specific tests to use intelligent evaluation
+goal_evaluation_mode: "intelligent"
+```
+
+**Phase 2: Adopt Hybrid Mode**
+```yaml
+# Use hybrid for safety while gaining intelligence
+goal_evaluation_mode: "hybrid"
+```
+
+**Phase 3: Gradual Rollout**
+```yaml
+# Eventually make intelligent/hybrid the default for new tests
+goal_evaluation_mode: "intelligent"
+```
+
+### When to Use Each Mode
+
+| Mode | Use Case | Pros | Cons |
+|------|----------|------|------|
+| **keywords** | Legacy tests, simple APIs | Fast, deterministic | False positives |
+| **intelligent** | Modern apps, complex goals | Accurate, context-aware | Requires LLM |
+| **hybrid** | Production, mixed scenarios | Smart + safe fallback | Slightly more complex |
+
+**Recommendation**: Start with `hybrid` mode for new tests to get the benefits of intelligent evaluation with keyword fallback safety.
+
+### 🧪 Try the Example
+
+See a complete example that demonstrates false positive prevention:
+
+```bash
+# Download the example test
+curl -O https://raw.githubusercontent.com/helixtechnologies/replicantx/main/tests/intelligent_evaluation_example.yaml
+
+# Run with intelligent evaluation
+replicantx run intelligent_evaluation_example.yaml --watch
+
+# Compare with keyword-only mode by changing goal_evaluation_mode to "keywords"
+```
+
+This example shows how intelligent evaluation distinguishes between:
+- ❌ "I'll create a ticket for your issue" (promise)
+- ✅ "Your refund has been processed, reference #REF123" (completion)
+
 ## 🧠 LLM Integration
 
 ReplicantX uses **PydanticAI** for powerful LLM integration with multiple providers:
