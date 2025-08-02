@@ -209,5 +209,7 @@ helix_tests/
 *.secret.yaml
 *_private.yaml
 *_secret.yaml
+tests/*.md
+tests/*.json
 
 reports/
