@@ -234,7 +234,7 @@ async def run_scenarios_async(
     suite_report.completed_at = datetime.now()
     
     # Display summary
-    display_summary(suite_report)
+    display_summary(suite_report, verbose)
     
     # Generate reports
     if report_path:
@@ -487,7 +487,7 @@ def load_scenario_config(file_path: str) -> ScenarioConfig:
         raise Exception(f"Invalid scenario configuration: {e}")
 
 
-def display_summary(suite_report: TestSuiteReport):
+def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
     """Display test execution summary.
     
     Args:
@@ -517,27 +517,45 @@ def display_summary(suite_report: TestSuiteReport):
     
     # Scenario details
     if suite_report.scenario_reports:
-        console.print("\n📋 Scenario Details")
-        
-        scenario_table = Table(show_header=True, header_style="bold blue")
-        scenario_table.add_column("Scenario")
-        scenario_table.add_column("Status")
-        scenario_table.add_column("Steps")
-        scenario_table.add_column("Duration")
-        
-        for scenario in suite_report.scenario_reports:
-            status = "✅ PASS" if scenario.passed else "❌ FAIL"
-            steps = f"{scenario.passed_steps}/{scenario.total_steps}"
-            duration = f"{scenario.duration_seconds:.2f}s"
+            console.print("\n📋 Scenario Details")
             
-            scenario_table.add_row(
-                scenario.scenario_name,
-                status,
-                steps,
-                duration
-            )
-        
-        console.print(scenario_table)
+            scenario_table = Table(show_header=True, header_style="bold blue")
+            scenario_table.add_column("Scenario")
+            scenario_table.add_column("Status")
+            scenario_table.add_column("Steps")
+            scenario_table.add_column("Duration")
+            scenario_table.add_column("Justification")
+            
+            for scenario in suite_report.scenario_reports:
+                status = "✅ PASS" if scenario.passed else "❌ FAIL"
+                steps = f"{scenario.passed_steps}/{scenario.total_steps}"
+                duration = f"{scenario.duration_seconds:.2f}s"
+                justification = scenario.justification or "No justification available"
+                
+                # Truncate justification for table display
+                if len(justification) > 80:
+                    justification = justification[:77] + "..."
+                
+                scenario_table.add_row(
+                    scenario.scenario_name,
+                    status,
+                    steps,
+                    duration,
+                    justification
+                )
+            
+            console.print(scenario_table)
+            
+            # Show detailed justification for failed scenarios
+            failed_scenarios = [s for s in suite_report.scenario_reports if not s.passed]
+            if failed_scenarios and verbose:
+                console.print("\n🔍 Detailed Justification for Failed Scenarios")
+                for scenario in failed_scenarios:
+                    console.print(f"\n**{scenario.scenario_name}**")
+                    if scenario.justification:
+                        console.print(f"💭 {scenario.justification}")
+                    if scenario.error:
+                        console.print(f"❌ Error: {scenario.error}")
 
 
 def generate_reports(suite_report: TestSuiteReport, report_path: str):

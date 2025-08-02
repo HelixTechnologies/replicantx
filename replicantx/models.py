@@ -264,6 +264,8 @@ class ScenarioReport(BaseModel):
     step_results: List[StepResult] = Field(default_factory=list, description="Results for each step")
     error: Optional[str] = Field(None, description="Overall error message if scenario failed")
     conversation_history: Optional[str] = Field(None, description="Complete conversation history for agent scenarios")
+    justification: Optional[str] = Field(None, description="Explanation of why the scenario passed or failed")
+    goal_evaluation_result: Optional[GoalEvaluationResult] = Field(None, description="Goal evaluation result for agent scenarios")
     started_at: datetime = Field(default_factory=datetime.now, description="When scenario started")
     completed_at: Optional[datetime] = Field(None, description="When scenario completed")
     
