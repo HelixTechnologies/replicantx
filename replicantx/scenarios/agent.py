@@ -285,6 +285,10 @@ class AgentScenarioRunner:
             conversation_summary = self.replicant_agent.get_conversation_summary()
             report.error = report.error or self._format_conversation_summary(conversation_summary)
             
+            # Update report.passed to consider both step success and goal achievement
+            goal_achieved = conversation_summary.get('goal_achieved', False)
+            report.passed = report.passed and goal_achieved
+            
             # Add conversation history to the last step result for reporting
             if report.step_results and self.replicant_agent:
                 conversation_history = self._format_full_conversation()
@@ -295,11 +299,14 @@ class AgentScenarioRunner:
             if self.watch:
                 self._watch_log("")
                 self._watch_log("📊 [bold green]CONVERSATION COMPLETE[/bold green]")
-                status = "✅ SUCCESS" if report.passed else "❌ FAILED"
+                # Consider both step success and goal achievement for overall success
+                goal_achieved = conversation_summary.get('goal_achieved', False)
+                overall_success = report.passed and goal_achieved
+                status = "✅ SUCCESS" if overall_success else "❌ FAILED"
                 self._watch_log(f"🏁 Status: {status}")
                 self._watch_log(f"🔢 Steps: {report.passed_steps}/{report.total_steps} passed")
                 self._watch_log(f"⏱️  Duration: {report.total_duration_ms/1000:.1f}s")
-                self._watch_log(f"🎯 Goal achieved: {'Yes' if conversation_summary.get('goal_achieved', False) else 'No'}")
+                self._watch_log(f"🎯 Goal achieved: {'Yes' if goal_achieved else 'No'}")
                 self._watch_log(f"📝 Facts used: {conversation_summary.get('facts_used', 0)}")
                 self._watch_log(f"💬 Total turns: {conversation_summary.get('total_turns', 0)}")
                 
@@ -314,8 +321,9 @@ class AgentScenarioRunner:
                     self._watch_log(f"📊 Confidence: {confidence:.2f}")
                     self._watch_log(f"💭 Reasoning: {reasoning}")
             
-            self._debug_log("Scenario completed successfully", {
+            self._debug_log("Scenario completed", {
                 "passed": report.passed,
+                "goal_achieved": goal_achieved,
                 "total_steps": report.total_steps,
                 "passed_steps": report.passed_steps,
                 "total_duration_ms": report.total_duration_ms,
