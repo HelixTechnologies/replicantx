@@ -7,7 +7,7 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      REPLICANTX_TARGET: pr-${{ github.event.pull_request.number }}-helix-api.onrender.com
+      REPLICANTX_TARGET: pr-${{ github.event.pull_request.number }}-your-api.onrender.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
