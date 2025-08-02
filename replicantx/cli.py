@@ -87,6 +87,12 @@ def run(
     max_retries: Optional[int] = typer.Option(
         None, "--max-retries", help="Override default max retries"
     ),
+    parallel: bool = typer.Option(
+        False, "--parallel", help="Run scenarios in parallel (overrides individual scenario settings)"
+    ),
+    max_concurrent: Optional[int] = typer.Option(
+        None, "--max-concurrent", help="Maximum number of scenarios to run concurrently (default: unlimited)"
+    ),
 ):
     """Run test scenarios from YAML files.
 
@@ -99,6 +105,7 @@ EXAMPLES:
   replicantx run tests/*.yaml --report report.md
   replicantx run tests/agent_test.yaml --watch --debug
   replicantx run tests/*.yaml --ci --report results.json
+  replicantx run tests/*.yaml --parallel --max-concurrent 3
     """
     console.print(f"🚀 ReplicantX {__version__} - Starting test execution")
     
@@ -135,6 +142,8 @@ EXAMPLES:
         watch=watch,
         timeout_override=timeout,
         max_retries_override=max_retries,
+        parallel=parallel,
+        max_concurrent=max_concurrent,
     ))
 
 
@@ -147,6 +156,8 @@ async def run_scenarios_async(
     watch: bool = False,
     timeout_override: Optional[int] = None,
     max_retries_override: Optional[int] = None,
+    parallel: bool = False,
+    max_concurrent: Optional[int] = None,
 ):
     """Run scenarios asynchronously."""
     # Initialize test suite report
@@ -190,45 +201,34 @@ async def run_scenarios_async(
         console=console,
     ) as progress:
         
-        for file_path, config in scenarios:
-            task = progress.add_task(f"Running {Path(file_path).name}...", total=None)
-            
-            try:
-                # Create appropriate runner based on level
-                if config.level == TestLevel.BASIC:
-                    runner = BasicScenarioRunner(config, debug=debug, watch=watch)
-                elif config.level == TestLevel.AGENT:
-                    runner = AgentScenarioRunner(config, debug=debug, watch=watch)
-                else:
-                    raise ValueError(f"Unsupported test level: {config.level}")
-                
-                # Run the scenario
-                scenario_report = await runner.run()
-                suite_report.scenario_reports.append(scenario_report)
-                
-                # Update counters
-                if scenario_report.passed:
-                    suite_report.passed_scenarios += 1
-                    progress.update(task, description=f"✅ {Path(file_path).name}")
-                else:
-                    suite_report.failed_scenarios += 1
-                    progress.update(task, description=f"❌ {Path(file_path).name}")
-                
-                if verbose:
-                    console.print(f"  Steps: {scenario_report.passed_steps}/{scenario_report.total_steps}")
-                    console.print(f"  Duration: {scenario_report.duration_seconds:.2f}s")
-                    if scenario_report.error:
-                        console.print(f"  Error: {scenario_report.error}")
-                
-            except Exception as e:
-                console.print(f"❌ Error running {file_path}: {e}")
-                suite_report.failed_scenarios += 1
-                progress.update(task, description=f"❌ {Path(file_path).name} (error)")
-                
-                if ci_mode:
-                    raise typer.Exit(1)
-            
-            progress.remove_task(task)
+        # Determine execution mode
+        should_run_parallel = parallel or any(config.parallel for _, config in scenarios)
+        
+        if should_run_parallel:
+            console.print(f"🔄 Running scenarios in parallel mode")
+            if max_concurrent:
+                console.print(f"📊 Max concurrent scenarios: {max_concurrent}")
+            await run_scenarios_parallel(
+                scenarios=scenarios,
+                suite_report=suite_report,
+                progress=progress,
+                ci_mode=ci_mode,
+                verbose=verbose,
+                debug=debug,
+                watch=watch,
+                max_concurrent=max_concurrent,
+            )
+        else:
+            console.print(f"🔄 Running scenarios sequentially")
+            await run_scenarios_sequential(
+                scenarios=scenarios,
+                suite_report=suite_report,
+                progress=progress,
+                ci_mode=ci_mode,
+                verbose=verbose,
+                debug=debug,
+                watch=watch,
+            )
     
     # Finalize report
     suite_report.completed_at = datetime.now()
@@ -246,6 +246,174 @@ async def run_scenarios_async(
         raise typer.Exit(1)
     
     console.print(f"\n✅ Test execution completed successfully")
+
+
+async def run_scenarios_sequential(
+    scenarios: List[tuple],
+    suite_report: TestSuiteReport,
+    progress: Progress,
+    ci_mode: bool,
+    verbose: bool,
+    debug: bool,
+    watch: bool,
+):
+    """Run scenarios sequentially."""
+    for file_path, config in scenarios:
+        task = progress.add_task(f"Running {Path(file_path).name}...", total=None)
+        
+        try:
+            # Create appropriate runner based on level
+            if config.level == TestLevel.BASIC:
+                runner = BasicScenarioRunner(config, debug=debug, watch=watch)
+            elif config.level == TestLevel.AGENT:
+                runner = AgentScenarioRunner(config, debug=debug, watch=watch)
+            else:
+                raise ValueError(f"Unsupported test level: {config.level}")
+            
+            # Run the scenario
+            scenario_report = await runner.run()
+            suite_report.scenario_reports.append(scenario_report)
+            
+            # Update counters
+            if scenario_report.passed:
+                suite_report.passed_scenarios += 1
+                progress.update(task, description=f"✅ {Path(file_path).name}")
+            else:
+                suite_report.failed_scenarios += 1
+                progress.update(task, description=f"❌ {Path(file_path).name}")
+            
+            if verbose:
+                console.print(f"  Steps: {scenario_report.passed_steps}/{scenario_report.total_steps}")
+                console.print(f"  Duration: {scenario_report.duration_seconds:.2f}s")
+                if scenario_report.error:
+                    console.print(f"  Error: {scenario_report.error}")
+            
+        except Exception as e:
+            console.print(f"❌ Error running {file_path}: {e}")
+            suite_report.failed_scenarios += 1
+            progress.update(task, description=f"❌ {Path(file_path).name} (error)")
+            
+            if ci_mode:
+                raise typer.Exit(1)
+        
+        progress.remove_task(task)
+
+
+async def run_scenarios_parallel(
+    scenarios: List[tuple],
+    suite_report: TestSuiteReport,
+    progress: Progress,
+    ci_mode: bool,
+    verbose: bool,
+    debug: bool,
+    watch: bool,
+    max_concurrent: Optional[int] = None,
+):
+    """Run scenarios in parallel."""
+    import asyncio
+    from asyncio import Semaphore
+    
+    # Create semaphore for concurrency control
+    semaphore = Semaphore(max_concurrent) if max_concurrent else None
+    
+    async def run_single_scenario(file_path: str, config: ScenarioConfig):
+        """Run a single scenario with proper error handling."""
+        task_id = None
+        try:
+            # Add progress task
+            task_id = progress.add_task(f"Running {Path(file_path).name}...", total=None)
+            
+            # Apply semaphore if concurrency is limited
+            if semaphore:
+                async with semaphore:
+                    return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+            else:
+                return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+                
+        except Exception as e:
+            console.print(f"❌ Error running {file_path}: {e}")
+            if task_id:
+                progress.update(task_id, description=f"❌ {Path(file_path).name} (error)")
+            return {
+                'file_path': file_path,
+                'config': config,
+                'report': None,
+                'error': str(e),
+                'task_id': task_id
+            }
+    
+    # Create all scenario tasks
+    tasks = [run_single_scenario(file_path, config) for file_path, config in scenarios]
+    
+    # Run all scenarios concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Process results
+    for result in results:
+        if isinstance(result, Exception):
+            console.print(f"❌ Unexpected error: {result}")
+            suite_report.failed_scenarios += 1
+            continue
+            
+        file_path = result['file_path']
+        config = result['config']
+        scenario_report = result['report']
+        error = result.get('error')
+        task_id = result['task_id']
+        
+        if error:
+            suite_report.failed_scenarios += 1
+            if ci_mode:
+                raise typer.Exit(1)
+        elif scenario_report:
+            suite_report.scenario_reports.append(scenario_report)
+            
+            # Update counters
+            if scenario_report.passed:
+                suite_report.passed_scenarios += 1
+                progress.update(task_id, description=f"✅ {Path(file_path).name}")
+            else:
+                suite_report.failed_scenarios += 1
+                progress.update(task_id, description=f"❌ {Path(file_path).name}")
+            
+            if verbose:
+                console.print(f"  Steps: {scenario_report.passed_steps}/{scenario_report.total_steps}")
+                console.print(f"  Duration: {scenario_report.duration_seconds:.2f}s")
+                if scenario_report.error:
+                    console.print(f"  Error: {scenario_report.error}")
+        
+        # Remove progress task
+        if task_id:
+            progress.remove_task(task_id)
+
+
+async def _execute_scenario(
+    file_path: str,
+    config: ScenarioConfig,
+    task_id: int,
+    debug: bool,
+    watch: bool,
+    verbose: bool,
+):
+    """Execute a single scenario and return the result."""
+    # Create appropriate runner based on level
+    if config.level == TestLevel.BASIC:
+        runner = BasicScenarioRunner(config, debug=debug, watch=watch)
+    elif config.level == TestLevel.AGENT:
+        runner = AgentScenarioRunner(config, debug=debug, watch=watch)
+    else:
+        raise ValueError(f"Unsupported test level: {config.level}")
+    
+    # Run the scenario
+    scenario_report = await runner.run()
+    
+    return {
+        'file_path': file_path,
+        'config': config,
+        'report': scenario_report,
+        'error': None,
+        'task_id': task_id
+    }
 
 
 def substitute_env_vars(value):

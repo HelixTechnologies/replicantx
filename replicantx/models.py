@@ -237,6 +237,7 @@ class ScenarioConfig(BaseModel):
     max_retries: int = Field(3, description="Maximum number of retries per step")
     retry_delay_seconds: float = Field(1.0, description="Delay between retries")
     validate_politeness: bool = Field(False, description="Whether to validate politeness/conversational tone in responses")
+    parallel: bool = Field(False, description="Whether to run this scenario in parallel with others")
     
     @model_validator(mode='after')
     def validate_scenario(self) -> 'ScenarioConfig':

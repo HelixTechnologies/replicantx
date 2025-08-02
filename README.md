@@ -16,6 +16,7 @@
 - **Technical Debugging**: Debug mode (`--debug`) with detailed HTTP, validation, and AI processing logs
 - **Multiple Authentication**: Supabase email+password, custom JWT, or no-auth
 - **CLI Interface**: Easy-to-use command-line interface with `replicantx run`
+- **Parallel Execution**: Run multiple test scenarios concurrently for faster execution
 - **Automatic .env Loading**: No manual environment variable sourcing required
 - **GitHub Actions Ready**: Built-in workflow for PR testing with Render preview URLs
 - **Rich Reporting**: Markdown and JSON reports with timing and assertion results
@@ -394,6 +395,12 @@ replicantx run tests/*.yaml --debug
 # Combined monitoring and debugging
 replicantx run tests/*.yaml --debug --watch
 
+# Run tests in parallel for faster execution
+replicantx run tests/*.yaml --parallel
+
+# Run with limited concurrency to prevent API overload
+replicantx run tests/*.yaml --parallel --max-concurrent 3
+
 # Validate test files without running
 replicantx validate tests/*.yaml --verbose
 ```
@@ -509,6 +516,111 @@ replicantx run tests/*.yaml --debug --ci
 # Combined with verbose output
 replicantx run tests/*.yaml --debug --verbose --report performance.json
 ```
+
+### ⚡ Parallel Test Execution
+
+ReplicantX supports parallel execution of test scenarios for significantly faster test runs, especially when testing multiple scenarios against the same API.
+
+#### 🚀 **Basic Parallel Execution**
+
+Run all scenarios in parallel (overrides individual scenario settings):
+
+```bash
+# Run all tests in parallel
+replicantx run tests/*.yaml --parallel
+
+# Run with limited concurrency to prevent API overload
+replicantx run tests/*.yaml --parallel --max-concurrent 3
+```
+
+#### 📋 **Per-Scenario Configuration**
+
+Control parallel execution at the scenario level:
+
+```yaml
+# tests/parallel_scenario.yaml
+name: "Parallel Test Scenario"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: noop
+level: basic
+parallel: true  # Enable parallel execution for this scenario
+steps:
+  - user: "Hello, test message"
+    expect_contains: ["response"]
+```
+
+```yaml
+# tests/sequential_scenario.yaml
+name: "Sequential Test Scenario"
+base_url: "https://api.example.com/chat"
+auth:
+  provider: noop
+level: basic
+parallel: false  # Run sequentially (default)
+steps:
+  - user: "Hello, test message"
+    expect_contains: ["response"]
+```
+
+#### 🔄 **Execution Modes**
+
+**Automatic Detection:**
+- If any scenario has `parallel: true`, all scenarios run in parallel
+- If `--parallel` flag is used, all scenarios run in parallel (overrides individual settings)
+- Otherwise, scenarios run sequentially
+
+**Mixed Execution:**
+```bash
+# Some scenarios parallel, some sequential - all run in parallel
+replicantx run tests/parallel_*.yaml tests/sequential_*.yaml
+```
+
+#### ⚙️ **Concurrency Control**
+
+**Unlimited Concurrency (Default):**
+```bash
+replicantx run tests/*.yaml --parallel
+```
+
+**Limited Concurrency:**
+```bash
+# Limit to 3 concurrent scenarios
+replicantx run tests/*.yaml --parallel --max-concurrent 3
+
+# Limit to 1 (effectively sequential but with parallel infrastructure)
+replicantx run tests/*.yaml --parallel --max-concurrent 1
+```
+
+#### 📊 **Performance Benefits**
+
+**Example: 10 scenarios, each taking 5 seconds**
+
+| Mode | Duration | Speed Improvement |
+|------|----------|-------------------|
+| Sequential | ~50 seconds | 1x |
+| Parallel (unlimited) | ~5 seconds | 10x |
+| Parallel (max 3) | ~17 seconds | 3x |
+
+#### ⚠️ **Considerations**
+
+**API Rate Limits:**
+- Use `--max-concurrent` to avoid overwhelming your API
+- Monitor API response times during parallel execution
+- Consider your API's rate limiting policies
+
+**Resource Usage:**
+- Parallel execution uses more memory and network connections
+- Monitor system resources during large parallel test runs
+
+**Test Dependencies:**
+- Tests that depend on execution order should use `parallel: false`
+- Consider using sequential execution for tests that modify shared state
+
+**Debugging:**
+- Parallel execution may make debugging more complex
+- Use `--verbose` to see detailed output from all scenarios
+- Consider running problematic tests sequentially for debugging
 
 ### Authentication Providers
 
