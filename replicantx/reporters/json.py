@@ -72,6 +72,8 @@ class JSONReporter:
                 "completed_at": report.completed_at.isoformat() if report.completed_at else None,
             },
             "error": report.error,
+            "justification": report.justification,
+            "goal_evaluation_result": self._serialize_goal_evaluation_result(report.goal_evaluation_result) if report.goal_evaluation_result else None,
             "step_results": [
                 self._serialize_step_result(step) for step in report.step_results
             ],
@@ -147,6 +149,24 @@ class JSONReporter:
             "assertions": [
                 self._serialize_assertion_result(assertion) for assertion in step.assertions
             ]
+        }
+    
+    def _serialize_goal_evaluation_result(self, result: 'GoalEvaluationResult') -> Dict[str, Any]:
+        """Serialize a goal evaluation result to dictionary.
+        
+        Args:
+            result: Goal evaluation result to serialize
+            
+        Returns:
+            Dictionary representation of the goal evaluation result
+        """
+        return {
+            "goal_achieved": result.goal_achieved,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "evaluation_method": result.evaluation_method,
+            "fallback_used": result.fallback_used,
+            "timestamp": result.timestamp.isoformat()
         }
     
     def _serialize_assertion_result(self, assertion: 'AssertionResult') -> Dict[str, Any]:

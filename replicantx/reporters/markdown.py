@@ -215,6 +215,17 @@ class MarkdownReporter:
                 lines.append(f"**Steps:** {scenario.passed_steps}/{scenario.total_steps}")
                 lines.append(f"**Success Rate:** {scenario.success_rate:.1f}%")
                 lines.append(f"**Duration:** {scenario.duration_seconds:.2f}s")
+                if scenario.justification:
+                    lines.append(f"**Justification:** {scenario.justification}")
+                
+                # Goal evaluation details for agent scenarios
+                if scenario.goal_evaluation_result:
+                    lines.append(f"**Goal Evaluation:**")
+                    lines.append(f"- Method: {scenario.goal_evaluation_result.evaluation_method}")
+                    lines.append(f"- Confidence: {scenario.goal_evaluation_result.confidence:.2f}")
+                    lines.append(f"- Fallback Used: {'Yes' if scenario.goal_evaluation_result.fallback_used else 'No'}")
+                    lines.append(f"- Reasoning: {scenario.goal_evaluation_result.reasoning}")
+                
                 lines.append("")
                 
                 # Complete conversation history for agent scenarios

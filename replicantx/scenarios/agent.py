@@ -10,7 +10,7 @@ system prompts to achieve specific goals.
 
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from ..auth import AuthBase, SupabaseAuth, JWTAuth, NoopAuth
 from ..models import (
@@ -288,6 +288,13 @@ class AgentScenarioRunner:
             # Update report.passed to consider both step success and goal achievement
             goal_achieved = conversation_summary.get('goal_achieved', False)
             report.passed = report.passed and goal_achieved
+            
+            # Store goal evaluation result if available
+            if hasattr(self.replicant_agent.state, 'goal_evaluation_result') and self.replicant_agent.state.goal_evaluation_result:
+                report.goal_evaluation_result = self.replicant_agent.state.goal_evaluation_result
+            
+            # Generate justification for the overall result
+            report.justification = self._generate_justification(report, conversation_summary)
             
             # Add conversation history to the last step result for reporting
             if report.step_results and self.replicant_agent:
@@ -649,6 +656,83 @@ class AgentScenarioRunner:
             f"- Conversation length: {summary['conversation_length']} messages"
         ]
         return "\n".join(lines)
+    
+    def _generate_justification(self, report: 'ScenarioReport', conversation_summary: Dict[str, Any]) -> str:
+        """Generate justification for the scenario result.
+        
+        Args:
+            report: The scenario report
+            conversation_summary: Summary from the replicant agent
+            
+        Returns:
+            Justification string explaining why the scenario passed or failed
+        """
+        goal_achieved = conversation_summary.get('goal_achieved', False)
+        total_turns = conversation_summary.get('total_turns', 0)
+        facts_used = conversation_summary.get('facts_used', 0)
+        
+        if report.passed:
+            # Scenario passed - explain why
+            justification_parts = []
+            
+            if report.passed_steps == report.total_steps:
+                justification_parts.append(f"All {report.total_steps} steps passed successfully")
+            else:
+                justification_parts.append(f"{report.passed_steps}/{report.total_steps} steps passed")
+            
+            if goal_achieved:
+                justification_parts.append("Goal was achieved")
+                
+                # Add goal evaluation details if available
+                if 'goal_evaluation_method' in conversation_summary:
+                    method = conversation_summary.get('goal_evaluation_method', 'unknown')
+                    confidence = conversation_summary.get('goal_evaluation_confidence', 0.0)
+                    reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
+                    
+                    justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
+                    justification_parts.append(f"Reasoning: {reasoning}")
+            else:
+                justification_parts.append("Goal was not achieved")
+            
+            justification_parts.append(f"Conversation completed in {total_turns} turns")
+            if facts_used > 0:
+                justification_parts.append(f"Used {facts_used} available facts")
+            
+            return ". ".join(justification_parts) + "."
+        else:
+            # Scenario failed - explain why
+            justification_parts = []
+            
+            if report.failed_steps > 0:
+                failed_step_details = []
+                for step in report.step_results:
+                    if not step.passed:
+                        failed_step_details.append(f"Step {step.step_index + 1}")
+                        if step.error:
+                            failed_step_details.append(f"Error: {step.error}")
+                        elif step.assertions:
+                            failed_assertions = [a for a in step.assertions if not a.passed]
+                            if failed_assertions:
+                                failed_step_details.append(f"Failed assertions: {len(failed_assertions)}")
+                
+                justification_parts.append(f"Failed steps: {', '.join(failed_step_details)}")
+            
+            if not goal_achieved:
+                justification_parts.append("Goal was not achieved")
+                
+                # Add goal evaluation details if available
+                if 'goal_evaluation_method' in conversation_summary:
+                    method = conversation_summary.get('goal_evaluation_method', 'unknown')
+                    confidence = conversation_summary.get('goal_evaluation_confidence', 0.0)
+                    reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
+                    
+                    justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
+                    justification_parts.append(f"Reasoning: {reasoning}")
+            
+            if report.error:
+                justification_parts.append(f"Error: {report.error}")
+            
+            return ". ".join(justification_parts) + "."
     
     def _format_full_conversation(self) -> str:
         """Format the complete conversation history for reporting.

@@ -157,6 +157,9 @@ class BasicScenarioRunner:
                     report.failed_steps += 1
                     report.passed = False
             
+            # Generate justification for the result
+            report.justification = self._generate_justification(report)
+            
             # Log final summary
             if self.watch:
                 self._watch_log("")
@@ -165,6 +168,8 @@ class BasicScenarioRunner:
                 self._watch_log(f"🏁 Status: {status}")
                 self._watch_log(f"🔢 Steps: {report.passed_steps}/{report.total_steps} passed")
                 self._watch_log(f"⏱️  Duration: {report.total_duration_ms/1000:.1f}s")
+                if report.justification:
+                    self._watch_log(f"💭 Justification: {report.justification}")
             
             self._debug_log("Basic scenario completed", {
                 "passed": report.passed,
@@ -229,6 +234,43 @@ class BasicScenarioRunner:
             step_result.passed = False
         
         return step_result
+    
+    def _generate_justification(self, report: 'ScenarioReport') -> str:
+        """Generate justification for the scenario result.
+        
+        Args:
+            report: The scenario report
+            
+        Returns:
+            Justification string explaining why the scenario passed or failed
+        """
+        if report.passed:
+            if report.passed_steps == report.total_steps:
+                return f"All {report.total_steps} steps passed successfully with all assertions satisfied."
+            else:
+                return f"{report.passed_steps}/{report.total_steps} steps passed. Some steps may have been skipped due to configuration."
+        else:
+            # Scenario failed - explain why
+            justification_parts = []
+            
+            if report.failed_steps > 0:
+                failed_step_details = []
+                for step in report.step_results:
+                    if not step.passed:
+                        failed_step_details.append(f"Step {step.step_index + 1}")
+                        if step.error:
+                            failed_step_details.append(f"Error: {step.error}")
+                        elif step.assertions:
+                            failed_assertions = [a for a in step.assertions if not a.passed]
+                            if failed_assertions:
+                                failed_step_details.append(f"Failed assertions: {len(failed_assertions)}")
+                
+                justification_parts.append(f"Failed steps: {', '.join(failed_step_details)}")
+            
+            if report.error:
+                justification_parts.append(f"Error: {report.error}")
+            
+            return ". ".join(justification_parts) + "."
     
     async def _make_api_request(self, user_message: str, timeout: Optional[int] = None) -> HTTPResponse:
         """Make API request with user message.
