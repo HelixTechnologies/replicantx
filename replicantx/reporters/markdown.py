@@ -220,11 +220,19 @@ class MarkdownReporter:
                 
                 # Goal evaluation details for agent scenarios
                 if scenario.goal_evaluation_result:
-                    lines.append(f"**Goal Evaluation:**")
-                    lines.append(f"- Method: {scenario.goal_evaluation_result.evaluation_method}")
-                    lines.append(f"- Confidence: {scenario.goal_evaluation_result.confidence:.2f}")
-                    lines.append(f"- Fallback Used: {'Yes' if scenario.goal_evaluation_result.fallback_used else 'No'}")
-                    lines.append(f"- Reasoning: {scenario.goal_evaluation_result.reasoning}")
+                    if scenario.goal_evaluation_result.evaluation_method == 'keywords':
+                        # Simple reporting for keyword-based evaluation
+                        if scenario.goal_evaluation_result.goal_achieved:
+                            lines.append(f"**Goal Evaluation:** Keyword matched - {scenario.goal_evaluation_result.reasoning}")
+                        else:
+                            lines.append(f"**Goal Evaluation:** No completion keywords found")
+                    else:
+                        # Detailed reporting for intelligent evaluation
+                        lines.append(f"**Goal Evaluation:**")
+                        lines.append(f"- Method: {scenario.goal_evaluation_result.evaluation_method}")
+                        lines.append(f"- Confidence: {scenario.goal_evaluation_result.confidence:.2f}")
+                        lines.append(f"- Fallback Used: {'Yes' if scenario.goal_evaluation_result.fallback_used else 'No'}")
+                        lines.append(f"- Reasoning: {scenario.goal_evaluation_result.reasoning}")
                 
                 lines.append("")
                 

@@ -160,14 +160,24 @@ class JSONReporter:
         Returns:
             Dictionary representation of the goal evaluation result
         """
-        return {
-            "goal_achieved": result.goal_achieved,
-            "confidence": result.confidence,
-            "reasoning": result.reasoning,
-            "evaluation_method": result.evaluation_method,
-            "fallback_used": result.fallback_used,
-            "timestamp": result.timestamp.isoformat()
-        }
+        if result.evaluation_method == 'keywords':
+            # Simple structure for keyword-based evaluation
+            return {
+                "goal_achieved": result.goal_achieved,
+                "evaluation_method": result.evaluation_method,
+                "keyword_result": result.reasoning if result.goal_achieved else "No keywords matched",
+                "timestamp": result.timestamp.isoformat()
+            }
+        else:
+            # Detailed structure for intelligent evaluation
+            return {
+                "goal_achieved": result.goal_achieved,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning,
+                "evaluation_method": result.evaluation_method,
+                "fallback_used": result.fallback_used,
+                "timestamp": result.timestamp.isoformat()
+            }
     
     def _serialize_assertion_result(self, assertion: 'AssertionResult') -> Dict[str, Any]:
         """Serialize an assertion result to dictionary.

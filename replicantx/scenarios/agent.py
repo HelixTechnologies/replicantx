@@ -324,9 +324,17 @@ class AgentScenarioRunner:
                     fallback = conversation_summary.get('goal_evaluation_fallback_used', False)
                     reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
                     
-                    self._watch_log(f"🧠 Evaluation method: {method}" + (" (fallback used)" if fallback else ""))
-                    self._watch_log(f"📊 Confidence: {confidence:.2f}")
-                    self._watch_log(f"💭 Reasoning: {reasoning}")
+                    if method == 'keywords':
+                        # Simple reporting for keyword-based evaluation
+                        if goal_achieved:
+                            self._watch_log(f"🔍 Keyword matched: {reasoning}")
+                        else:
+                            self._watch_log(f"🔍 No completion keywords found")
+                    else:
+                        # Detailed reporting for intelligent evaluation
+                        self._watch_log(f"🧠 Evaluation method: {method}" + (" (fallback used)" if fallback else ""))
+                        self._watch_log(f"📊 Confidence: {confidence:.2f}")
+                        self._watch_log(f"💭 Reasoning: {reasoning}")
             
             self._debug_log("Scenario completed", {
                 "passed": report.passed,
@@ -689,8 +697,13 @@ class AgentScenarioRunner:
                     confidence = conversation_summary.get('goal_evaluation_confidence', 0.0)
                     reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
                     
-                    justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
-                    justification_parts.append(f"Reasoning: {reasoning}")
+                    if method == 'keywords':
+                        # Simple justification for keyword-based evaluation
+                        justification_parts.append(f"Goal achieved via keyword matching: {reasoning}")
+                    else:
+                        # Detailed justification for intelligent evaluation
+                        justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
+                        justification_parts.append(f"Reasoning: {reasoning}")
             else:
                 justification_parts.append("Goal was not achieved")
             
@@ -726,8 +739,13 @@ class AgentScenarioRunner:
                     confidence = conversation_summary.get('goal_evaluation_confidence', 0.0)
                     reasoning = conversation_summary.get('goal_evaluation_reasoning', 'No reasoning provided')
                     
-                    justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
-                    justification_parts.append(f"Reasoning: {reasoning}")
+                    if method == 'keywords':
+                        # Simple justification for keyword-based evaluation
+                        justification_parts.append("Goal not achieved - no completion keywords found")
+                    else:
+                        # Detailed justification for intelligent evaluation
+                        justification_parts.append(f"Goal evaluation: {method} method with {confidence:.2f} confidence")
+                        justification_parts.append(f"Reasoning: {reasoning}")
             
             if report.error:
                 justification_parts.append(f"Error: {report.error}")
