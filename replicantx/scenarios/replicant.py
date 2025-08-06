@@ -284,19 +284,37 @@ REASONING: [Brief explanation of your decision]"""
         confidence = 0.5
         reasoning = "Could not parse LLM response"
         
+        # Track if we're currently parsing reasoning
+        parsing_reasoning = False
+        reasoning_lines = []
+        
         for line in lines:
             line = line.strip()
             if line.startswith('RESULT:'):
                 result_text = line.replace('RESULT:', '').strip().upper()
                 goal_achieved = result_text == 'ACHIEVED'
+                parsing_reasoning = False
             elif line.startswith('CONFIDENCE:'):
                 try:
                     confidence = float(line.replace('CONFIDENCE:', '').strip())
                     confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
                 except ValueError:
                     confidence = 0.5
+                parsing_reasoning = False
             elif line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
+                # Start parsing reasoning
+                parsing_reasoning = True
+                reasoning_lines = [line.replace('REASONING:', '').strip()]
+            elif parsing_reasoning and line:
+                # Continue parsing reasoning until we hit another section
+                reasoning_lines.append(line)
+            elif parsing_reasoning and not line:
+                # Empty line might indicate end of reasoning, but continue in case there's more
+                continue
+        
+        # Combine all reasoning lines
+        if reasoning_lines:
+            reasoning = ' '.join(reasoning_lines).strip()
         
         return goal_achieved, confidence, reasoning
 

@@ -1120,6 +1120,11 @@ replicant:
 - ✅ Simple scenarios with clear completion signals
 - ✅ Performance is critical (no LLM calls)
 
+**Reporting:** Simplified reporting that focuses on keyword matching:
+- Watch mode shows: `🔍 Keyword matched: (matched: confirmed, booked)` or `🔍 No completion keywords found`
+- Justification shows: `Goal achieved via keyword matching: Keyword evaluation: Found completion keywords (matched: confirmed, booked)`
+- JSON reports include simple `keyword_result` field instead of detailed reasoning
+
 #### 2. **Intelligent Mode** (Recommended)
 LLM-powered analysis that understands context and intent:
 
@@ -1136,6 +1141,11 @@ replicant:
 - ✅ **False positive reduction**: "I'll confirm later" ≠ "Your booking is confirmed"
 - ✅ **Intent understanding**: Recognizes goal completion without exact keywords
 - ✅ **Reasoning provided**: Detailed explanation of evaluation decisions
+
+**Reporting:** Detailed reporting with full analysis:
+- Watch mode shows: `🧠 Evaluation method: intelligent`, `📊 Confidence: 0.85`, `💭 Reasoning: Detailed explanation...`
+- Justification includes confidence scores and detailed reasoning
+- JSON reports include full evaluation metadata (confidence, reasoning, fallback_used)
 
 #### 3. **Hybrid Mode** (Best of Both Worlds)
 Attempts LLM evaluation first, falls back to keywords if uncertain:
