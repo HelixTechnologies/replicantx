@@ -27,18 +27,20 @@ from rich.console import Console
 class AgentScenarioRunner:
     """Runner for Replicant agent-driven (Level 2) test scenarios."""
     
-    def __init__(self, config: ScenarioConfig, debug: bool = False, watch: bool = False):
+    def __init__(self, config: ScenarioConfig, debug: bool = False, watch: bool = False, verbose: bool = False):
         """Initialize the agent scenario runner.
         
         Args:
             config: Scenario configuration with Replicant agent setup
             debug: Enable debug mode with technical details
             watch: Enable watch mode for real-time monitoring
+            verbose: Enable verbose output for system prompts
         """
         self.config = config
         self.debug = debug
         self.watch = watch
-        self.console = Console() if (debug or watch) else None
+        self.verbose = verbose
+        self.console = Console() if (debug or watch or verbose) else None
         self.auth_provider = self._create_auth_provider()
         self.http_client: Optional[HTTPClient] = None
         self.replicant_agent: Optional[ReplicantAgent] = None
@@ -147,7 +149,7 @@ class AgentScenarioRunner:
         })
         
         # Initialize Replicant agent
-        self.replicant_agent = ReplicantAgent.create(self.config.replicant)
+        self.replicant_agent = ReplicantAgent.create(self.config.replicant, verbose=self.verbose)
         
         current_datetime = datetime.now()
         date_str = current_datetime.strftime("%A, %B %d, %Y")

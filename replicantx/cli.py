@@ -73,7 +73,7 @@ def run(
         False, "--ci", help="CI mode: exit with non-zero code if any tests fail"
     ),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose output"
+        False, "--verbose", help="Enable verbose output"
     ),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug mode: Shows detailed technical information including HTTP client setup, request payloads, response validation, AI processing, and assertion results. Perfect for troubleshooting failed tests and performance analysis."
@@ -266,7 +266,7 @@ async def run_scenarios_sequential(
             if config.level == TestLevel.BASIC:
                 runner = BasicScenarioRunner(config, debug=debug, watch=watch)
             elif config.level == TestLevel.AGENT:
-                runner = AgentScenarioRunner(config, debug=debug, watch=watch)
+                runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
             else:
                 raise ValueError(f"Unsupported test level: {config.level}")
             
@@ -400,7 +400,7 @@ async def _execute_scenario(
     if config.level == TestLevel.BASIC:
         runner = BasicScenarioRunner(config, debug=debug, watch=watch)
     elif config.level == TestLevel.AGENT:
-        runner = AgentScenarioRunner(config, debug=debug, watch=watch)
+        runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
     else:
         raise ValueError(f"Unsupported test level: {config.level}")
     
