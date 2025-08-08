@@ -39,9 +39,10 @@ class GoalEvaluator(BaseModel):
     model_name: Optional[str] = Field(None, description="Model for intelligent evaluation")
     custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
     completion_keywords: List[str] = Field(..., description="Keywords for keyword-based evaluation")
+    verbose: bool = Field(False, description="Enable verbose output for system prompts")
     
     @classmethod
-    def create(cls, config: ReplicantConfig) -> "GoalEvaluator":
+    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "GoalEvaluator":
         """Create a GoalEvaluator from ReplicantConfig.
         
         Args:
@@ -56,7 +57,8 @@ class GoalEvaluator(BaseModel):
             mode=config.goal_evaluation_mode,
             model_name=model_name,
             custom_prompt=config.goal_evaluation_prompt,
-            completion_keywords=config.completion_keywords
+            completion_keywords=config.completion_keywords,
+            verbose=verbose
         )
     
     async def evaluate_goal_completion(
@@ -146,11 +148,23 @@ class GoalEvaluator(BaseModel):
             
             # Create LLM agent for evaluation
             model = infer_model(self.model_name)
+            # Only include max_tokens for evaluation - don't set temperature to avoid compatibility issues
             agent = PydanticAgent(
                 model=model,
                 instructions="You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.",
-                model_settings={"temperature": 0.1, "max_tokens": 200}  # Low temperature for consistency
+                model_settings={"max_tokens": 1000}  # Only include max_tokens, skip temperature for compatibility
             )
+            
+            # Verbose logging of the goal evaluation prompt
+            if self.verbose:
+                print("\n" + "="*80)
+                print("🔍 VERBOSE: GOAL EVALUATION PROMPT SENT TO PYDANTICAI")
+                print("="*80)
+                print(f"Model: {self.model_name}")
+                print(f"Model Settings: {{'max_tokens': 200}}")
+                print(f"Instructions: You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.")
+                print(f"Prompt: {prompt}")
+                print("="*80 + "\n")
             
             # Get evaluation
             result = await agent.run(prompt)
@@ -327,6 +341,7 @@ class ResponseGenerator(BaseModel):
     system_prompt: str = Field(..., description="System prompt for response generation")
     model_settings: Dict[str, Any] = Field(default_factory=dict, description="Model settings")
     facts: Dict[str, Any] = Field(..., description="Available facts")
+    verbose: bool = Field(False, description="Enable verbose output for system prompts")
     
     def _create_agent(self) -> PydanticAgent:
         """Create a PydanticAI agent instance."""
@@ -374,6 +389,18 @@ class ResponseGenerator(BaseModel):
             
             # Create and use PydanticAI agent
             agent = self._create_agent()
+            
+            # Verbose logging of the complete system prompt
+            if self.verbose:
+                print("\n" + "="*80)
+                print("🔍 VERBOSE: COMPLETE SYSTEM PROMPT SENT TO PYDANTICAI")
+                print("="*80)
+                print(f"Model: {self.model_name}")
+                print(f"Model Settings: {self.model_settings}")
+                print(f"System Prompt: {self.system_prompt}")
+                print(f"Context: {context}")
+                print("="*80 + "\n")
+            
             result = await agent.run(context)
             
             return result.output
@@ -418,16 +445,17 @@ class ReplicantAgent(BaseModel):
     goal_evaluator: GoalEvaluator = Field(..., description="Goal evaluation utility")
     
     @classmethod
-    def create(cls, config: ReplicantConfig) -> "ReplicantAgent":
+    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "ReplicantAgent":
         """Create a new Replicant agent.
         
         Args:
             config: Replicant configuration
+            verbose: Enable verbose output for system prompts
             
         Returns:
             Configured Replicant agent
         """
-        # Build model settings
+        # Build model settings - only include parameters that are explicitly provided
         model_settings = {}
         if config.llm.temperature is not None:
             model_settings["temperature"] = config.llm.temperature
@@ -438,10 +466,11 @@ class ReplicantAgent(BaseModel):
             model_name=config.llm.model,
             system_prompt=config.system_prompt,
             model_settings=model_settings,
-            facts=config.facts
+            facts=config.facts,
+            verbose=verbose
         )
         
-        goal_evaluator = GoalEvaluator.create(config)
+        goal_evaluator = GoalEvaluator.create(config, verbose=verbose)
         
         return cls(
             config=config,
