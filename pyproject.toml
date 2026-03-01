@@ -33,6 +33,7 @@ dependencies = [
     "pydantic-ai>=0.6.2",
     "python-dotenv>=1.1.1",
     "typing-extensions>=4.14.1",
+    "playwright>=1.48.0",
 ]
 
 [project.optional-dependencies]

@@ -10,9 +10,11 @@ basic fixed-step scenarios and advanced Replicant agent-driven scenarios.
 from .basic import BasicScenarioRunner
 from .agent import AgentScenarioRunner
 from .replicant import ReplicantAgent
+from .browser_agent import BrowserScenarioRunner
 
 __all__ = [
     "BasicScenarioRunner",
     "AgentScenarioRunner",
     "ReplicantAgent",
+    "BrowserScenarioRunner",
 ] 

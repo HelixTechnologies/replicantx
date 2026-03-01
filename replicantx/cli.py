@@ -31,8 +31,8 @@ except ImportError:
     pass
 
 from . import __version__
-from .models import ScenarioConfig, TestSuiteReport, TestLevel
-from .scenarios import BasicScenarioRunner, AgentScenarioRunner
+from .models import ScenarioConfig, TestSuiteReport, TestLevel, InteractionMode
+from .scenarios import BasicScenarioRunner, AgentScenarioRunner, BrowserScenarioRunner
 from .reporters import MarkdownReporter, JSONReporter
 
 app = typer.Typer(
@@ -260,20 +260,27 @@ async def run_scenarios_sequential(
     """Run scenarios sequentially."""
     for file_path, config in scenarios:
         task = progress.add_task(f"Running {Path(file_path).name}...", total=None)
-        
+
         try:
-            # Create appropriate runner based on level
+            # Create appropriate runner based on level and interaction mode
             if config.level == TestLevel.BASIC:
                 runner = BasicScenarioRunner(config, debug=debug, watch=watch)
             elif config.level == TestLevel.AGENT:
-                runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+                # Check if browser mode
+                if config.replicant and config.replicant.interaction_mode == InteractionMode.BROWSER:
+                    # Import auth providers
+                    from .auth import create_auth_provider
+                    auth_provider = create_auth_provider(config.auth)
+                    runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose)
+                else:
+                    runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
             else:
                 raise ValueError(f"Unsupported test level: {config.level}")
-            
+
             # Run the scenario
             scenario_report = await runner.run()
             suite_report.scenario_reports.append(scenario_report)
-            
+
             # Update counters
             if scenario_report.passed:
                 suite_report.passed_scenarios += 1
@@ -281,21 +288,21 @@ async def run_scenarios_sequential(
             else:
                 suite_report.failed_scenarios += 1
                 progress.update(task, description=f"❌ {Path(file_path).name}")
-            
+
             if verbose:
                 console.print(f"  Steps: {scenario_report.passed_steps}/{scenario_report.total_steps}")
                 console.print(f"  Duration: {scenario_report.duration_seconds:.2f}s")
                 if scenario_report.error:
                     console.print(f"  Error: {scenario_report.error}")
-            
+
         except Exception as e:
             console.print(f"❌ Error running {file_path}: {e}")
             suite_report.failed_scenarios += 1
             progress.update(task, description=f"❌ {Path(file_path).name} (error)")
-            
+
             if ci_mode:
                 raise typer.Exit(1)
-        
+
         progress.remove_task(task)
 
 
@@ -396,17 +403,24 @@ async def _execute_scenario(
     verbose: bool,
 ):
     """Execute a single scenario and return the result."""
-    # Create appropriate runner based on level
+    # Create appropriate runner based on level and interaction mode
     if config.level == TestLevel.BASIC:
         runner = BasicScenarioRunner(config, debug=debug, watch=watch)
     elif config.level == TestLevel.AGENT:
-        runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+        # Check if browser mode
+        if config.replicant and config.replicant.interaction_mode == InteractionMode.BROWSER:
+            # Import auth providers
+            from .auth import create_auth_provider
+            auth_provider = create_auth_provider(config.auth)
+            runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose)
+        else:
+            runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
     else:
         raise ValueError(f"Unsupported test level: {config.level}")
-    
+
     # Run the scenario
     scenario_report = await runner.run()
-    
+
     return {
         'file_path': file_path,
         'config': config,

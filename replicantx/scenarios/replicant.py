@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.models import infer_model
 
-from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode
+from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode, BrowserObservation
 from ..tools.http_client import HTTPResponse
 
 
@@ -62,62 +62,75 @@ class GoalEvaluator(BaseModel):
         )
     
     async def evaluate_goal_completion(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,  # Changed from conversation_history for flexibility
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate whether the conversation goal has been achieved.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text (or messages)
             facts: Available facts for context
-            
+            current_observation: Optional browser observation for browser mode
+
         Returns:
             Goal evaluation result
         """
+        # For browser mode, include observation in the evaluation
+        if current_observation:
+            # Add browser context to facts
+            facts = dict(facts)  # Copy to avoid mutation
+            facts["current_url"] = current_observation.url
+            facts["page_title"] = current_observation.title
+            facts["visible_text"] = current_observation.visible_text[:2000]  # Excerpt
+
         if self.mode == GoalEvaluationMode.KEYWORDS:
-            return self._evaluate_with_keywords(goal, conversation_history)
+            return self._evaluate_with_keywords(goal, conversation, current_observation)
         elif self.mode == GoalEvaluationMode.INTELLIGENT:
-            return await self._evaluate_with_llm(goal, conversation_history, facts)
+            return await self._evaluate_with_llm(goal, conversation, facts, current_observation)
         elif self.mode == GoalEvaluationMode.HYBRID:
-            return await self._evaluate_hybrid(goal, conversation_history, facts)
+            return await self._evaluate_hybrid(goal, conversation, facts, current_observation)
         else:
             raise ValueError(f"Unknown goal evaluation mode: {self.mode}")
     
     def _evaluate_with_keywords(
-        self, 
-        goal: str, 
-        conversation_history: List[Message]
+        self,
+        goal: str,
+        conversation: str,
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using keyword matching (legacy behavior).
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
-            
+            conversation: Conversation text
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
-        # Check for completion keywords in recent API responses
+        # Check for completion keywords in conversation and visible text
         goal_achieved = False
         matched_keywords = []
-        
-        if conversation_history:
-            recent_messages = conversation_history[-2:]  # Last 2 messages
-            for message in recent_messages:
-                if message.role == "assistant":
-                    message_lower = message.content.lower()
-                    for keyword in self.completion_keywords:
-                        if keyword.lower() in message_lower:
-                            goal_achieved = True
-                            matched_keywords.append(keyword)
-        
+        search_text = conversation.lower()
+
+        # Add browser visible text to search
+        if current_observation:
+            search_text += " " + current_observation.visible_text.lower()
+
+        # Check for keywords
+        for keyword in self.completion_keywords:
+            if keyword.lower() in search_text:
+                goal_achieved = True
+                matched_keywords.append(keyword)
+
         reasoning = f"Keyword evaluation: {'Found' if goal_achieved else 'No'} completion keywords"
         if matched_keywords:
             reasoning += f" (matched: {', '.join(matched_keywords)})"
-        
+
         return GoalEvaluationResult(
             goal_achieved=goal_achieved,
             confidence=1.0 if goal_achieved else 0.0,  # Keywords give binary confidence
@@ -127,25 +140,27 @@ class GoalEvaluator(BaseModel):
         )
     
     async def _evaluate_with_llm(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using LLM analysis.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
         try:
             # Build evaluation prompt
-            prompt = self._build_evaluation_prompt(goal, conversation_history, facts)
-            
+            prompt = self._build_evaluation_prompt(goal, conversation, facts, current_observation)
+
             # Create LLM agent for evaluation
             model = infer_model(self.model_name)
             # Only include max_tokens for evaluation - don't set temperature to avoid compatibility issues
@@ -154,7 +169,7 @@ class GoalEvaluator(BaseModel):
                 instructions="You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.",
                 model_settings={"max_tokens": 1000}  # Only include max_tokens, skip temperature for compatibility
             )
-            
+
             # Verbose logging of the goal evaluation prompt
             if self.verbose:
                 print("\n" + "="*80)
@@ -165,14 +180,14 @@ class GoalEvaluator(BaseModel):
                 print(f"Instructions: You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.")
                 print(f"Prompt: {prompt}")
                 print("="*80 + "\n")
-            
+
             # Get evaluation
             result = await agent.run(prompt)
             response = result.output.strip()
-            
+
             # Parse LLM response
             goal_achieved, confidence, reasoning = self._parse_llm_response(response)
-            
+
             return GoalEvaluationResult(
                 goal_achieved=goal_achieved,
                 confidence=confidence,
@@ -180,7 +195,7 @@ class GoalEvaluator(BaseModel):
                 evaluation_method="intelligent",
                 fallback_used=False
             )
-            
+
         except Exception as e:
             # Return failure result if LLM evaluation fails
             return GoalEvaluationResult(
@@ -192,50 +207,66 @@ class GoalEvaluator(BaseModel):
             )
     
     async def _evaluate_hybrid(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using LLM with keyword fallback.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
-        # Try LLM evaluation first
         try:
-            llm_result = await self._evaluate_with_llm(goal, conversation_history, facts)
-            if llm_result.confidence > 0.5:  # Use LLM result if confident
-                return llm_result
-        except Exception:
-            pass
-        
-        # Fall back to keyword evaluation
-        keyword_result = self._evaluate_with_keywords(goal, conversation_history)
-        keyword_result.evaluation_method = "hybrid"
-        keyword_result.fallback_used = True
-        keyword_result.reasoning = f"LLM evaluation uncertain, using keyword fallback: {keyword_result.reasoning}"
-        
-        return keyword_result
-    
+            # Try LLM evaluation first
+            llm_result = await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+
+            # If confidence is too low, fall back to keywords
+            if llm_result.confidence < 0.5:
+                keyword_result = self._evaluate_with_keywords(goal, conversation, current_observation)
+                return GoalEvaluationResult(
+                    goal_achieved=keyword_result.goal_achieved,
+                    confidence=keyword_result.confidence,
+                    reasoning=f"Hybrid evaluation: LLM confidence {llm_result.confidence:.2f} too low, fell back to keywords. {keyword_result.reasoning}",
+                    evaluation_method="hybrid",
+                    fallback_used=True
+                )
+
+            return llm_result
+
+        except Exception as e:
+            # Fall back to keywords on error
+            keyword_result = self._evaluate_with_keywords(goal, conversation, current_observation)
+            return GoalEvaluationResult(
+                goal_achieved=keyword_result.goal_achieved,
+                confidence=keyword_result.confidence,
+                reasoning=f"Hybrid evaluation: LLM evaluation failed ({str(e)}), fell back to keywords. {keyword_result.reasoning}",
+                evaluation_method="hybrid",
+                fallback_used=True
+            )
+
     def _build_evaluation_prompt(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> str:
         """Build the evaluation prompt for LLM analysis.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            current_observation: Optional browser observation
+
         Returns:
             Formatted evaluation prompt
         """
@@ -244,29 +275,44 @@ class GoalEvaluator(BaseModel):
             return self.custom_prompt.format(
                 goal=goal,
                 facts=json.dumps(facts, indent=2),
-                conversation=self._format_conversation_for_prompt(conversation_history)
+                conversation=conversation,
             )
-        
-        # Default evaluation prompt
-        prompt = f"""Given this conversation goal: "{goal}"
 
-User facts: {json.dumps(facts, indent=2)}
+        # Build evaluation prompt
+        prompt_parts = [
+            f"Given this conversation goal: \"{goal}\"",
+            "",
+            f"User facts: {json.dumps(facts, indent=2)}",
+            "",
+        ]
 
-Recent conversation history:
-{self._format_conversation_for_prompt(conversation_history[-6:])}
+        # Add browser context if available
+        if current_observation:
+            prompt_parts.extend([
+                "Current browser state:",
+                f"  URL: {current_observation.url}",
+                f"  Title: {current_observation.title}",
+                f"  Visible text excerpt: {current_observation.visible_text[:500]}...",
+                "",
+            ])
 
-Has the goal been definitively achieved? Consider:
-1. Has the user received confirmation that the action was completed?
-2. Are there concrete indicators of success (confirmation numbers, bookings, etc.)?
-3. Distinguish between promises ("I will do this") vs accomplishments ("This is done")
-4. Look for specific completion indicators, not just polite acknowledgments
+        prompt_parts.extend([
+            "Recent conversation:",
+            conversation,
+            "",
+            "Has the goal been definitively achieved? Consider:",
+            "1. Has the user received confirmation that the action was completed?",
+            "2. Are there concrete indicators of success (confirmation numbers, bookings, etc.)?",
+            "3. Distinguish between promises (\"I will do this\") vs accomplishments (\"This is done\")",
+            "4. Look for specific completion indicators, not just polite acknowledgments",
+            "",
+            "Respond in this exact format:",
+            "RESULT: [ACHIEVED or NOT_ACHIEVED]",
+            "CONFIDENCE: [0.0 to 1.0]",
+            "REASONING: [Brief explanation of your decision]",
+        ])
 
-Respond in this exact format:
-RESULT: [ACHIEVED or NOT_ACHIEVED]
-CONFIDENCE: [0.0 to 1.0]
-REASONING: [Brief explanation of your decision]"""
-
-        return prompt
+        return "\n".join(prompt_parts)
     
     def _format_conversation_for_prompt(self, messages: List[Message]) -> str:
         """Format conversation history for the evaluation prompt.
