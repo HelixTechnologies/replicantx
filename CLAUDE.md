@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**ReplicantX** is an end-to-end testing harness for AI agents that communicate via HTTP APIs. It enables comprehensive testing of conversational AI systems with support for intelligent agents, multiple authentication methods, and detailed reporting.
+**ReplicantX** is an end-to-end testing harness for AI agents that communicate via HTTP APIs or web browsers. It enables comprehensive testing of conversational AI systems with support for intelligent agents, multiple authentication methods, browser automation, and detailed reporting.
 
-**Stack**: Python 3.11+, Pydantic v2, PydanticAI, httpx, Typer, Rich
+**Stack**: Python 3.11+, Pydantic v2, PydanticAI, httpx, Typer, Rich, Playwright
 **Structure**: Modular architecture with pluggable auth, payload formatters, and reporters
 
 📖 **For detailed architecture and module documentation, see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md)**
+🌐 **For browser mode configuration guide, see [docs/browser-mode-config.md](docs/browser-mode-config.md)**
 
 ## Development Commands
 
@@ -26,6 +27,9 @@ pip install -e ".[all]"
 
 # Development dependencies
 pip install -e ".[dev]"
+
+# Install Playwright browsers (for browser mode)
+playwright install
 ```
 
 ### Code Quality
@@ -80,6 +84,12 @@ replicantx run tests/*.yaml --watch
 
 # Run tests in parallel
 replicantx run tests/*.yaml --parallel --max-concurrent 3
+
+# Browser mode: Run headed (watch browser in action)
+replicantx run tests/browser_test.yaml --headed
+
+# Browser mode: View traces (after test completes)
+playwright show-trace artifacts/trace.zip
 ```
 
 ## Architecture
@@ -93,20 +103,27 @@ replicantx/
 ├── models.py           # Pydantic models for configuration and results
 ├── scenarios/          # Test scenario runners
 │   ├── basic.py        # Fixed message scenarios (Level 1)
-│   ├── agent.py        # Intelligent agent scenarios (Level 2)
+│   ├── agent.py        # Intelligent agent scenarios (Level 2 - API mode)
+│   ├── browser_agent.py # Browser automation scenarios (Level 2 - Browser mode)
 │   └── replicant.py    # Core Replicant agent implementation
 ├── auth/               # Authentication providers
 │   ├── base.py         # Base authentication class
 │   ├── supabase.py     # Supabase auth implementation
 │   ├── jwt.py          # JWT token auth
-│   └── noop.py         # No authentication
+│   ├── noop.py         # No authentication
+│   └── magic_link.py   # Supabase magic link auth (for browser mode)
 ├── reporters/          # Output formatters
 │   ├── markdown.py     # Markdown report generation
 │   └── json.py         # JSON report generation
 └── tools/              # Utility modules
     ├── http_client.py  # HTTP client with retry logic
     ├── payload_formatter.py  # API payload format support
-    └── session_manager.py    # Session management
+    ├── session_manager.py    # Session management
+    └── browser/        # Browser automation toolkit
+        ├── observation.py        # Page observation extraction
+        ├── actions.py            # Browser action execution
+        ├── artifacts.py           # Trace & screenshot management
+        └── playwright_manager.py  # Playwright driver
 ```
 
 ### Test Levels
@@ -117,7 +134,8 @@ replicantx/
 - Assertions: `expect_contains`, `expect_regex`, `expect_equals`, `expect_not_contains`
 
 **Level 2 (Agent):** Intelligent AI-powered Replicant agents
-- Defined in `scenarios/agent.py` and `scenarios/replicant.py`
+- **API Mode**: `scenarios/agent.py` - HTTP API testing with structured messages
+- **Browser Mode**: `scenarios/browser_agent.py` - Playwright browser automation with visual interaction
 - Uses PydanticAI for LLM integration
 - Configurable facts, goals, and personalities
 - Goal evaluation with intelligent analysis
@@ -127,6 +145,7 @@ replicantx/
 Pluggable authentication providers in `auth/`:
 - **noop**: No authentication (default)
 - **supabase**: Supabase email/password authentication
+- **supabase_magic_link**: Supabase magic link with admin API (for browser mode, supports auto-generated users)
 - **jwt**: JWT token-based authentication
 
 All providers inherit from `auth/base.py` base class.
@@ -170,6 +189,42 @@ Three evaluation modes for detecting conversation completion:
 - **intelligent**: LLM-powered analysis with context awareness
 - **hybrid**: Smart evaluation with keyword fallback
 
+### Browser Mode (Playwright Automation)
+
+**NEW**: Browser mode enables end-to-end testing of web applications using Playwright:
+- **Interaction**: Chat-based interaction with automatic button/element detection
+- **Visual Evaluation**: Screenshot-based goal evaluation using vision models
+- **Smart Detection**: Heuristics for finding chat inputs and prioritizing elements
+- **Magic Link Auth**: Supabase admin API for automated user generation
+
+**Components in `tools/browser/`:**
+- **observation.py**: Page observation with smart element ranking
+- **actions.py**: Browser action execution (send_chat, click, fill, press, wait, scroll, navigate)
+- **artifacts.py**: Trace and screenshot management
+- **playwright_manager.py**: Playwright driver with lifecycle management
+
+**Evidence Modes** (`browser.goal_evidence`):
+- `dom`: Text/DOM-only evaluation (fastest)
+- `screenshot`: Visual analysis with vision models (most accurate)
+- `dom_then_screenshot`: Smart hybrid (recommended for production)
+- `both`: Combined evaluation with confidence averaging
+
+**Model Selection**:
+- `llm.model`: Main model for response generation (e.g., `openai:gpt-4.1-mini`)
+- `goal_evaluation_model`: Model for DOM-based evaluation
+- `browser.screenshot_evaluation_model`: Vision model for screenshots (e.g., `openai:gpt-5.2`, `anthropic:claude-4-6-sonnet-latest`)
+
+**Configuration**:
+```yaml
+replicant:
+  interaction_mode: browser
+  browser:
+    start_url: "https://app.example.com"
+    headless: true
+    goal_evidence: dom_then_screenshot
+    screenshot_evaluation_model: "openai:gpt-5.2"
+```
+
 ### Environment Variables
 
 ReplicantX automatically detects environment variables from `.env` files and system environment:
@@ -182,7 +237,8 @@ ReplicantX automatically detects environment variables from `.env` files and sys
 
 **Supabase Authentication:**
 - `SUPABASE_URL`: Supabase project URL
-- `SUPABASE_ANON_KEY`: Supabase anonymous key
+- `SUPABASE_ANON_KEY`: Supabase anonymous key (for email/password auth)
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key (for browser mode magic link auth)
 
 **Target API:**
 - `REPLICANTX_TARGET`: Target API domain
@@ -224,3 +280,12 @@ Rich reporting in multiple formats:
 - The `test` model in PydanticAI doesn't require API keys for development
 - Session management is more efficient than full conversation history for stateful APIs
 - Goal evaluation with intelligent mode reduces false positives from keyword matching
+
+**Browser Mode:**
+- Requires `playwright install` to download browser binaries
+- Supabase service role keys are admin-level - never commit them to repos
+- Screenshot evaluation requires vision-capable models (GPT-4o, Claude 3.5 Sonnet, etc.)
+- Use `dom_then_screenshot` evidence mode for best cost/accuracy balance
+- Browser traces can be viewed with `playwright show-trace trace.zip`
+- Headed mode (`--headed`) is useful for debugging but should be `headless: true` in CI/CD
+- Magic link auth auto-generates unique emails (`replicantx+<uuid>@replicantx.org`) when `user_mode: generated`

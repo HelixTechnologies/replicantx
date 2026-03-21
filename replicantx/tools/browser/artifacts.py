@@ -24,6 +24,8 @@ class ArtifactManager:
         artifacts_dir: str = "artifacts",
         scenario_name: str = "scenario",
         trace_mode: TraceMode = TraceMode.RETAIN_ON_FAILURE,
+        config_screenshot_each_turn: bool = False,
+        debug: bool = False,
     ):
         """
         Initialize the artifact manager.
@@ -32,10 +34,14 @@ class ArtifactManager:
             artifacts_dir: Directory to store artifacts
             scenario_name: Name of the scenario (for subdirectories)
             trace_mode: When to retain traces
+            config_screenshot_each_turn: Whether to screenshot each turn per config
+            debug: Whether to print debug information
         """
         self.artifacts_dir = Path(artifacts_dir)
         self.scenario_name = scenario_name
         self.trace_mode = trace_mode
+        self.config_screenshot_each_turn = config_screenshot_each_turn
+        self.debug = debug
         self.scenario_dir = self.artifacts_dir / scenario_name
         self.trace_path = self.scenario_dir / "trace.zip"
         self.screenshot_dir = self.scenario_dir / "screenshots"
@@ -119,8 +125,10 @@ class ArtifactManager:
         Returns:
             Path to the screenshot file, or None if not captured
         """
-        if not force and self.trace_mode == TraceMode.OFF:
-            # Only capture on failure or if forced
+        # Capture if forced or if configured for each turn
+        should_capture = force or self.config_screenshot_each_turn
+
+        if not should_capture:
             return None
 
         try:
@@ -133,6 +141,9 @@ class ArtifactManager:
 
             # Capture screenshot
             await page.screenshot(path=str(screenshot_path), full_page=True)
+
+            if self.debug:
+                print(f"📸 Screenshot captured: {screenshot_path}")
 
             return str(screenshot_path)
         except Exception as e:

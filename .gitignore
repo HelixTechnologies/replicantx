@@ -212,4 +212,6 @@ helix_tests/
 tests/*.md
 tests/*.json
 
+artifacts/
+
 reports/

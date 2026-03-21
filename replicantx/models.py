@@ -128,6 +128,7 @@ class InteractiveElement(BaseModel):
     id: str = Field(..., description="Stable element ID for the current turn")
     role: str = Field(..., description="Element role (button, link, textbox, menuitem, etc.)")
     name: str = Field(..., description="Best-effort accessible name or inner text")
+    tag_name: str = Field("", description="HTML tag name (e.g., INPUT, BUTTON, A)")
     locator: Optional[str] = Field(None, description="Playwright locator strategy (internal use)")
 
 
@@ -168,8 +169,18 @@ class BrowserConfig(BaseModel):
     max_interactive_elements: int = Field(40, description="Maximum interactive elements to extract")
     max_visible_text_chars: int = Field(6000, description="Maximum visible text characters to extract")
 
+    # Planner model (decides what action to take each turn)
+    planner_model: Optional[str] = Field(
+        None,
+        description="PydanticAI model for the browser planner agent (e.g., 'openai:gpt-5.2'). Uses screenshot + DOM to decide actions. Falls back to main LLM model if not specified."
+    )
+
     # Evidence for goal evaluation
     goal_evidence: GoalEvidenceMode = Field(GoalEvidenceMode.DOM, description="Evidence type for goal evaluation")
+    screenshot_evaluation_model: Optional[str] = Field(
+        None,
+        description="PydanticAI model for screenshot-based goal evaluation (e.g., 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet-latest'). If not specified, uses goal_evaluation_model or main LLM model."
+    )
     screenshot_on_each_turn: bool = Field(False, description="Whether to capture screenshot each turn")
     screenshot_on_failure: bool = Field(True, description="Whether to capture screenshot on failure")
 

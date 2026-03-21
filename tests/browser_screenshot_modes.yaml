@@ -1,0 +1,41 @@
+# Example showing all screenshot evaluation modes
+
+# Mode 1: DOM-only (default, fastest)
+# Uses text and DOM structure for evaluation
+name: "DOM Evaluation Only"
+replicant:
+  interaction_mode: browser
+  browser:
+    goal_evidence: dom
+
+# Mode 2: Screenshot-only
+# Uses visual analysis with multimodal LLM (slower but more accurate for UI states)
+name: "Screenshot Evaluation Only"
+replicant:
+  interaction_mode: browser
+  browser:
+    goal_evidence: screenshot
+
+# Mode 3: DOM then screenshot (recommended)
+# Tries DOM first (fast), falls back to screenshot if confidence < 0.5
+name: "DOM with Screenshot Fallback"
+replicant:
+  interaction_mode: browser
+  browser:
+    goal_evidence: dom_then_screenshot
+
+# Mode 4: Both (most thorough)
+# Evaluates with both DOM and screenshot, combines results
+name: "Combined DOM + Screenshot"
+replicant:
+  interaction_mode: browser
+  browser:
+    goal_evidence: both
+    screenshot_on_each_turn: true  # Capture each turn for evaluation
+
+# Example usage recommendations:
+#
+# - For development/debugging: Use "dom_then_screenshot" with screenshot_on_each_turn=false
+# - For production speed: Use "dom" with screenshot_on_failure=true
+# - For maximum accuracy: Use "both" with screenshot_on_each_turn=true
+# - For visual-heavy apps: Use "screenshot" or "dom_then_screenshot"

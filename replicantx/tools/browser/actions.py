@@ -155,55 +155,38 @@ async def _execute_click(
     timeout_seconds: int,
 ) -> tuple[bool, str, Optional[BrowserObservation]]:
     """
-    Execute a click action on an element.
+    Execute a click action using the stored element reference.
 
     Args:
         page: Playwright page object
-        element_id: ID of element to click
-        observation: Current page observation with element locators
+        element_id: Index into window.__rx_elements
+        observation: Current page observation
         timeout_seconds: Timeout for action
 
     Returns:
         Tuple of (success, message, new_observation)
     """
-    if not observation or not observation.interactive_elements:
-        return False, "No interactive elements available", None
-
-    # Find element by ID
-    target_element = None
-    for elem in observation.interactive_elements:
-        if elem.id == element_id:
-            target_element = elem
-            break
-
-    if not target_element:
-        return False, f"Element with ID {element_id} not found", None
+    target_name = element_id
+    if observation:
+        for elem in observation.interactive_elements:
+            if elem.id == element_id:
+                target_name = f"{elem.role}: {elem.name}"
+                break
 
     try:
-        # Click the element using its role and name
-        # Build a selector based on role and name
-        if target_element.role == "button":
-            selector = f"button:has-text('{target_element.name}')"
-        elif target_element.role == "link":
-            selector = f"a:has-text('{target_element.name}')"
-        elif target_element.role == "textbox" or target_element.tag_name == "input":
-            selector = f"input"
-        else:
-            # Generic selector with role
-            selector = f"[role='{target_element.role}']"
+        handle = await page.evaluate_handle(
+            f"window.__rx_elements && window.__rx_elements[{element_id}]"
+        )
+        is_valid = await page.evaluate("el => el instanceof HTMLElement", handle)
+        if not is_valid:
+            return False, f"Element {element_id} no longer exists in the DOM", None
 
-        # Click the element
-        await page.click(selector, timeout=timeout_seconds * 1000)
-
-        # Wait for page to settle
+        await handle.as_element().click(timeout=timeout_seconds * 1000)
         await _wait_for_page_settle(page, timeout_seconds)
-
-        # Extract new observation
         new_observation = await extract_observation(page)
-
-        return True, f"Clicked {target_element.role}: {target_element.name}", new_observation
+        return True, f"Clicked {target_name}", new_observation
     except Exception as e:
-        return False, f"Failed to click element: {str(e)}", None
+        return False, f"Failed to click element {element_id}: {str(e)}", None
 
 
 async def _execute_fill(
@@ -213,32 +196,99 @@ async def _execute_fill(
     timeout_seconds: int,
 ) -> tuple[bool, str, Optional[BrowserObservation]]:
     """
-    Execute a fill action on an element.
+    Execute a fill action using the stored element reference.
 
     Args:
         page: Playwright page object
-        element_id: ID of element to fill
-        value: Value to fill
+        element_id: Index into window.__rx_elements
+        value: Value to type
         timeout_seconds: Timeout for action
 
     Returns:
         Tuple of (success, message, new_observation)
     """
-    # Similar to click, but fill instead
-    # For simplicity, we'll use a basic implementation
+    if not value:
+        return False, "No value provided for fill action", None
+
     try:
-        # Try to find the element by text content
-        await page.fill(f"input, textarea", value, timeout=timeout_seconds * 1000)
+        handle = await page.evaluate_handle(
+            f"window.__rx_elements && window.__rx_elements[{element_id}]"
+        )
+        is_valid = await page.evaluate("el => el instanceof HTMLElement", handle)
+        if not is_valid:
+            return False, f"Element {element_id} no longer exists in the DOM", None
 
-        # Wait a bit
-        await asyncio.sleep(0.5)
+        element = handle.as_element()
 
-        # Extract new observation
+        # Step 1: Try plain fill first
+        try:
+            await element.click(timeout=timeout_seconds * 1000)
+            await element.fill(value, timeout=timeout_seconds * 1000)
+        except Exception:
+            # fill() fails on non-input elements (custom selects, divs, etc.)
+            # Fall through to the type-and-select approach below
+            await element.click(timeout=timeout_seconds * 1000)
+            await page.keyboard.type(value, delay=30)
+
+        # Step 2: Wait briefly for any dropdown/combobox options to appear
+        await asyncio.sleep(0.4)
+
+        # Step 3: Look for dropdown options that match the typed value
+        selected = await _try_select_dropdown_option(page, value)
+
+        if selected:
+            await asyncio.sleep(0.3)
+            new_observation = await extract_observation(page)
+            return True, f"Selected \"{value}\" from dropdown for element {element_id}", new_observation
+
         new_observation = await extract_observation(page)
-
-        return True, f"Filled field with: {value}", new_observation
+        return True, f"Filled element {element_id} with: {value}", new_observation
     except Exception as e:
-        return False, f"Failed to fill element: {str(e)}", None
+        return False, f"Failed to fill element {element_id}: {str(e)}", None
+
+
+async def _try_select_dropdown_option(page: Page, value: str) -> bool:
+    """
+    After typing into a combobox/select, look for a visible dropdown
+    option that matches the value and click it.
+
+    Handles common patterns: listbox roles, data-option attributes,
+    li items inside dropdown containers, etc.
+
+    Returns True if an option was found and clicked.
+    """
+    value_lower = value.lower().strip()
+
+    # Common selectors for dropdown options (ordered by specificity)
+    option_selectors = [
+        "[role='option']",
+        "[role='listbox'] li",
+        "[role='listbox'] [role='option']",
+        "ul[class*='menu'] li",
+        "ul[class*='list'] li",
+        "div[class*='option']",
+        "div[class*='menu'] div[class*='option']",
+        ".rc-virtual-list .ant-select-item",
+        "li[data-option]",
+    ]
+
+    for selector in option_selectors:
+        try:
+            options = await page.query_selector_all(selector)
+            for opt in options:
+                if not await opt.is_visible():
+                    continue
+                text = (await opt.inner_text()).strip()
+                if not text:
+                    continue
+                # Case-insensitive containment match in either direction
+                if value_lower in text.lower() or text.lower() in value_lower:
+                    await opt.click()
+                    return True
+        except Exception:
+            continue
+
+    return False
 
 
 async def _execute_press(
@@ -280,7 +330,8 @@ async def _execute_wait(
         Tuple of (success, message, new_observation)
     """
     if duration_ms is None:
-        duration_ms = 1000  # Default 1 second
+        duration_ms = 2000
+    duration_ms = min(duration_ms, 10000)
 
     await asyncio.sleep(duration_ms / 1000.0)
 

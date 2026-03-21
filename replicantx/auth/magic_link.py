@@ -5,8 +5,9 @@ Supabase magic link authentication provider for ReplicantX.
 """
 
 import uuid
-from typing import Optional
-from playwright.async_api import BrowserContext, APIRequestContext
+from typing import Optional, Tuple
+
+from playwright.async_api import BrowserContext
 
 from replicantx.auth.base import AuthBase
 
@@ -90,48 +91,31 @@ class SupabaseMagicLinkAuth(AuthBase):
             raise RuntimeError("Browser context not set. Call set_browser_context() first.")
 
         try:
-            # Generate magic link using Supabase admin API
-            from supabase import __version__ as supabase_version
+            access_token, refresh_token = self._generate_and_verify(email)
 
-            # Use the admin API to generate a magic link
-            # This requires the service role key
-            magic_link_data = self.client.auth.admin.generate_link(
-                type="magiclink",
-                email=email,
-                options={"redirect_to": self.redirect_to} if self.redirect_to else None,
-            )
-
-            # Extract the access token from the magic link
-            # The magic link contains an access_token in the URL fragment or query params
-            magic_link_url = magic_link_data.action_link
-            access_token = self._extract_token_from_link(magic_link_url)
-
-            if not access_token:
-                raise Exception("Could not extract access token from magic link")
-
-            # Use the browser context's APIRequestContext to call the app refresh endpoint
-            # This will set the httpOnly cookies in the browser context
+            # Use the browser context's APIRequestContext to call the app
+            # refresh endpoint — Set-Cookie headers update the browser
+            # context cookie jar automatically (Playwright feature).
             request_context = self._browser_context.request
-
-            # Call the app refresh endpoint with the access token
-            # The endpoint should set httpOnly cookies (access_token, refresh_token)
-            refresh_url = self.app_refresh_endpoint
             response = await request_context.post(
-                refresh_url,
+                self.app_refresh_endpoint,
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {access_token}",
                 },
+                data={
+                    "refresh_token": refresh_token,
+                },
             )
 
             if not response.ok:
+                body = await response.text()
                 raise Exception(
-                    f"Failed to call refresh endpoint: {response.status} {response.status_text}"
+                    f"Failed to call refresh endpoint: "
+                    f"{response.status} {response.status_text} — {body}"
                 )
 
-            # Store the access token
             self._token = access_token
-
             return access_token
 
         except Exception as e:
@@ -150,54 +134,40 @@ class SupabaseMagicLinkAuth(AuthBase):
             Access token
         """
         try:
-            # Generate magic link
-            magic_link_data = self.client.auth.admin.generate_link(
-                type="magiclink",
-                email=email,
-                options={"redirect_to": self.redirect_to} if self.redirect_to else None,
-            )
-
-            # Extract the access token
-            magic_link_url = magic_link_data.action_link
-            access_token = self._extract_token_from_link(magic_link_url)
-
-            if not access_token:
-                raise Exception("Could not extract access token from magic link")
-
+            access_token, _ = self._generate_and_verify(email)
             self._token = access_token
             return access_token
 
         except Exception as e:
             raise Exception(f"Supabase magic link authentication failed: {str(e)}")
 
-    def _extract_token_from_link(self, magic_link_url: str) -> Optional[str]:
+    def _generate_and_verify(self, email: str) -> Tuple[str, str]:
         """
-        Extract access token from magic link URL.
+        Generate a magic link and immediately verify it to obtain session tokens.
 
-        Args:
-            magic_link_url: Magic link URL
+        1. Admin generate_link → email_otp (raw OTP)
+        2. client.auth.verify_otp with email + token → session
 
         Returns:
-            Access token or None
+            (access_token, refresh_token)
         """
-        import urllib.parse
+        link_params: dict = {"type": "magiclink", "email": email}
+        if self.redirect_to:
+            link_params["options"] = {"redirect_to": self.redirect_to}
 
-        # Parse the URL
-        parsed = urllib.parse.urlparse(magic_link_url)
+        link_resp = self.client.auth.admin.generate_link(link_params)
+        props = link_resp.properties
 
-        # Check fragment (for hash-based tokens)
-        if parsed.fragment:
-            fragment_params = urllib.parse.parse_qs(parsed.fragment)
-            if "access_token" in fragment_params:
-                return fragment_params["access_token"][0]
+        # Use the actual verification_type from the response — for new
+        # users Supabase returns "signup" instead of "magiclink".
+        auth_resp = self.client.auth.verify_otp(
+            {"type": props.verification_type, "token_hash": props.hashed_token}
+        )
 
-        # Check query parameters
-        if parsed.query:
-            query_params = urllib.parse.parse_qs(parsed.query)
-            if "access_token" in query_params:
-                return query_params["access_token"][0]
+        if not auth_resp.session:
+            raise Exception("No session returned from OTP verification")
 
-        return None
+        return auth_resp.session.access_token, auth_resp.session.refresh_token
 
     def get_headers(self) -> dict:
         """

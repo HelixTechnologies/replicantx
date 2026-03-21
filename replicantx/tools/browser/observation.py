@@ -88,24 +88,29 @@ async def extract_interactive_elements(
     page: Page, max_elements: int = 40
 ) -> List[InteractiveElement]:
     """
-    Extract interactive elements from the page.
+    Extract interactive elements from the page with smart ranking.
 
     Queries for common interactables, filters for visible/enabled elements
-    with meaningful names, and returns a sorted list.
+    with meaningful names, and returns a sorted list with chat-thread elements
+    prioritized.
 
     Args:
         page: Playwright page object
         max_elements: Maximum number of elements to return
 
     Returns:
-        List of interactive elements
+        List of interactive elements, ranked by relevance
     """
-    # Use JavaScript to extract interactive elements
-    elements_data = await page.evaluate(
-        """() => {
-            const elements = [];
+    # First, try to detect chat area
+    chat_area_selector = await _detect_chat_area(page)
 
-            // Common interactive selectors
+    # Use JavaScript to extract interactive elements, rank them, and store
+    # references in window.__rx_elements so actions can target them by index.
+    elements_data = await page.evaluate(
+        """(chatAreaSelector) => {
+            const collected = [];
+            window.__rx_elements = [];
+
             const selectors = [
                 'button:not([disabled])',
                 'a[href]',
@@ -118,84 +123,150 @@ async def extract_interactive_elements(
                 '[role="tab"]',
                 '[role="checkbox"]',
                 '[role="radio"]',
+                '[role="option"]',
+                '[role="listbox"] > *',
+                'li[data-option]',
+                'div[class*="option"]',
             ];
 
-            const uniqueElements = new Set();
+            const seen = new Set();
 
             selectors.forEach(selector => {
-                const nodes = document.querySelectorAll(selector);
-                nodes.forEach(node => {
-                    // Skip if already added
-                    if (uniqueElements.has(node)) return;
-                    uniqueElements.add(node);
+                document.querySelectorAll(selector).forEach(node => {
+                    if (seen.has(node)) return;
+                    seen.add(node);
 
-                    // Check visibility
                     const rect = node.getBoundingClientRect();
-                    const isVisible = rect.width > 0 && rect.height > 0;
+                    if (rect.width <= 0 || rect.height <= 0) return;
 
-                    if (!isVisible) return;
-
-                    // Get accessible name or text
-                    let name = '';
-
-                    // Try aria-label first
-                    name = node.getAttribute('aria-label') || '';
-
-                    // Try placeholder for inputs
+                    let name = node.getAttribute('aria-label') || '';
                     if (!name && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
                         name = node.getAttribute('placeholder') || '';
+                        if (!name) {
+                            const label = node.labels && node.labels[0];
+                            if (label) name = label.innerText || '';
+                        }
+                        if (!name) name = node.getAttribute('name') || '';
                     }
-
-                    // Try inner text
-                    if (!name) {
-                        name = node.innerText || node.textContent || '';
+                    if (!name && node.tagName === 'SELECT') {
+                        const label = node.labels && node.labels[0];
+                        if (label) name = label.innerText || '';
+                        if (!name) name = node.getAttribute('name') || '';
                     }
+                    if (!name) name = (node.innerText || node.textContent || '');
+                    name = name.trim().replace(/\\s+/g, ' ').slice(0, 100);
+                    if (!name) return;
 
-                    // Clean up name
-                    name = name.trim().slice(0, 100); // Limit to 100 chars
+                    let role = node.getAttribute('role') || node.tagName.toLowerCase();
 
-                    if (!name) return; // Skip elements without meaningful names
-
-                    // Get role
-                    let role = node.tagName.toLowerCase();
-                    if (node.getAttribute('role')) {
-                        role = node.getAttribute('role');
+                    let score = 0;
+                    if (chatAreaSelector) {
+                        try {
+                            const chatArea = document.querySelector(chatAreaSelector);
+                            if (chatArea && chatArea.contains(node)) {
+                                score += 100;
+                            } else if (chatArea) {
+                                const chatRect = chatArea.getBoundingClientRect();
+                                const distance = Math.abs(rect.top - chatRect.top) +
+                                                Math.abs(rect.left - chatRect.left);
+                                if (distance < 500) score += Math.max(0, 50 - distance / 10);
+                            }
+                        } catch (e) {}
                     }
+                    if (role === 'button' || node.tagName === 'BUTTON') score += 20;
+                    else if (role === 'link' || node.tagName === 'A') score += 10;
 
-                    // Store element info
-                    elements.push({
+                    const nl = name.toLowerCase();
+                    if (nl.includes('submit') || nl.includes('confirm') || nl.includes('continue'))
+                        score += 15;
+                    if (nl.includes('skip') || nl.includes('cancel') ||
+                        node.closest('nav') || node.closest('footer'))
+                        score -= 10;
+
+                    // Store the DOM node reference for action execution
+                    const idx = window.__rx_elements.length;
+                    window.__rx_elements.push(node);
+
+                    collected.push({
                         tagName: node.tagName,
                         role: role,
                         name: name,
-                        // We'll use a unique identifier for the locator
-                        id: `${elements.length}`,
+                        score: score,
+                        idx: idx,
                     });
                 });
             });
 
-            return elements;
-        }"""
+            collected.sort((a, b) => b.score - a.score);
+            return collected;
+        }""",
+        chat_area_selector,
     )
 
-    # Convert to InteractiveElement objects
     interactive_elements = []
     for elem_data in elements_data[:max_elements]:
-        element = InteractiveElement(
-            id=elem_data["id"],
-            role=elem_data["role"],
-            name=elem_data["name"],
-            locator=None,  # Will be set by the action handler
+        interactive_elements.append(
+            InteractiveElement(
+                id=str(elem_data["idx"]),
+                role=elem_data["role"],
+                name=elem_data["name"],
+                tag_name=elem_data["tagName"],
+            )
         )
-        interactive_elements.append(element)
 
     return interactive_elements
 
 
+async def _detect_chat_area(page: Page) -> Optional[str]:
+    """
+    Detect the main chat/thread area on the page.
+
+    Uses heuristics to find containers that likely hold chat conversations.
+
+    Args:
+        page: Playwright page object
+
+    Returns:
+        CSS selector for the chat area, or None
+    """
+    # Common chat/thread area selectors (in order of preference)
+    selectors = [
+        "[data-testid='chat-thread']",
+        "[data-testid='conversation']",
+        "[data-testid='messages']",
+        "[role='log']",  # ARIA log role is often used for chat
+        ".chat-thread",
+        ".conversation",
+        ".messages",
+        "#chat",
+        "#conversation",
+        "main",  # Main content area
+    ]
+
+    for selector in selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element:
+                # Check if visible and has content
+                is_visible = await element.is_visible()
+                if is_visible:
+                    # Check if it has multiple children (likely a container)
+                    has_children = await element.evaluate(
+                        "el => el.children && el.children.length > 2"
+                    )
+                    if has_children:
+                        return selector
+        except Exception:
+            continue
+
+    return None
+
+
 async def detect_chat_input(page: Page) -> Optional[str]:
     """
-    Detect chat input field using heuristics.
+    Detect chat input field using enhanced heuristics.
 
-    Tries common selectors for chat inputs and returns the first match.
+    Tries multiple strategies to find the most likely chat input field.
 
     Args:
         page: Playwright page object
@@ -203,29 +274,115 @@ async def detect_chat_input(page: Page) -> Optional[str]:
     Returns:
         Locator string for the chat input, or None if not found
     """
-    # Common chat input selectors (in order of preference)
+    # Strategy 1: Look for chat-specific data attributes
     selectors = [
-        "textarea[placeholder*='message' i]",
-        "textarea[placeholder*='chat' i]",
-        "input[placeholder*='message' i]",
-        "input[placeholder*='chat' i]",
-        "textarea[placeholder*='type' i]",
-        "input[placeholder*='type' i]",
         "[data-testid='chat-input']",
         "[data-testid='message-input']",
-        "[name='message']",
-        "[name='chat']",
-        "div[contenteditable='true']:not([aria-hidden])",
+        "[data-testid='prompt-input']",
     ]
 
     for selector in selectors:
         try:
             element = await page.query_selector(selector)
-            if element:
-                # Check if visible
-                is_visible = await element.is_visible()
-                if is_visible:
+            if element and await element.is_visible():
+                return selector
+        except Exception:
+            continue
+
+    # Strategy 2: Look for textarea with chat-related placeholders
+    textarea_selectors = [
+        "textarea[placeholder*='message' i]",
+        "textarea[placeholder*='chat' i]",
+        "textarea[placeholder*='type' i]",
+        "textarea[placeholder*='ask' i]",
+        "textarea[placeholder*='write' i]",
+        "textarea[placeholder*='prompt' i]",
+    ]
+
+    for selector in textarea_selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                return selector
+        except Exception:
+            continue
+
+    # Strategy 3: Look for input fields with chat-related attributes
+    input_selectors = [
+        "input[placeholder*='message' i]",
+        "input[placeholder*='chat' i]",
+        "input[name='message' i]",
+        "input[name='chat' i]",
+        "input[name='prompt' i]",
+    ]
+
+    for selector in input_selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                return selector
+        except Exception:
+            continue
+
+    # Strategy 4: Look for contenteditable divs (common in modern chat apps)
+    contenteditable_selectors = [
+        "div[contenteditable='true']:not([aria-hidden])",
+        "div[contenteditable='plaintext-only']:not([aria-hidden])",
+    ]
+
+    for selector in contenteditable_selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                # Check if it's likely a chat input (has aria-label or placeholder)
+                aria_label = await element.get_attribute("aria-label")
+                placeholder = await element.get_attribute("placeholder")
+                role = await element.get_attribute("role")
+
+                if aria_label and any(
+                    word in aria_label.lower()
+                    for word in ["message", "chat", "prompt", "type", "write"]
+                ):
                     return selector
+                if placeholder and any(
+                    word in placeholder.lower()
+                    for word in ["message", "chat", "prompt", "type", "write"]
+                ):
+                    return selector
+                if role == "textbox":
+                    return selector
+        except Exception:
+            continue
+
+    # Strategy 5: Find any textarea in the chat area
+    chat_area = await _detect_chat_area(page)
+    if chat_area:
+        try:
+            # Look for textarea within chat area
+            textarea_in_chat = await page.query_selector(f"{chat_area} textarea")
+            if textarea_in_chat and await textarea_in_chat.is_visible():
+                return f"{chat_area} textarea"
+
+            # Look for contenteditable in chat area
+            contenteditable_in_chat = await page.query_selector(
+                f"{chat_area} div[contenteditable='true']"
+            )
+            if contenteditable_in_chat and await contenteditable_in_chat.is_visible():
+                return f"{chat_area} div[contenteditable='true']"
+        except Exception:
+            pass
+
+    # Strategy 6: Fallback to any visible textarea or input[type="text"]
+    fallback_selectors = [
+        "textarea:not([disabled])",
+        "input[type='text']:not([disabled])",
+    ]
+
+    for selector in fallback_selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                return selector
         except Exception:
             continue
 
