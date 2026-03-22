@@ -94,6 +94,26 @@ class TraceMode(str, Enum):
     ON = "on"  # Always keep trace
 
 
+class IssueMode(str, Enum):
+    """How ReplicantX should handle issue processing."""
+    OFF = "off"
+    AUTO_HIGH_CONFIDENCE = "auto-high-confidence"
+    DRAFT_ONLY = "draft-only"
+
+
+class IssueArtifactUploadMode(str, Enum):
+    """Whether issue artifacts should be uploaded."""
+    OFF = "off"
+    ON = "on"
+
+
+class IssueDecision(str, Enum):
+    """Classifier output for a browser issue candidate."""
+    AUTO_FILE = "auto_file"
+    REVIEW = "review"
+    SKIP = "skip"
+
+
 class LLMConfig(BaseModel):
     """Configuration for LLM using PydanticAI models."""
     model_config = ConfigDict(extra="forbid")
@@ -129,6 +149,20 @@ class InteractiveElement(BaseModel):
     role: str = Field(..., description="Element role (button, link, textbox, menuitem, etc.)")
     name: str = Field(..., description="Best-effort accessible name or inner text")
     tag_name: str = Field("", description="HTML tag name (e.g., INPUT, BUTTON, A)")
+    placeholder: Optional[str] = Field(None, description="Placeholder text if present")
+    current_value: Optional[str] = Field(None, description="Current visible value if readable")
+    is_typeahead: bool = Field(
+        False,
+        description="Whether the control appears to behave like a combobox/type-ahead",
+    )
+    is_expanded: Optional[bool] = Field(
+        None,
+        description="Whether the control is currently expanded",
+    )
+    is_required: bool = Field(
+        False,
+        description="Whether the field is marked as required (required attribute, aria-required, or a * label indicator)",
+    )
     locator: Optional[str] = Field(None, description="Playwright locator strategy (internal use)")
 
 
@@ -220,6 +254,255 @@ class BrowserActionResult(BaseModel):
     latency_ms: float = Field(..., description="Action execution time in milliseconds")
 
 
+class BrowserNetworkEvent(BaseModel):
+    """Normalized Playwright network event for diagnostics."""
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str = Field(..., description="response or requestfailed")
+    url: str = Field(..., description="Request URL")
+    method: str = Field(..., description="HTTP method")
+    resource_type: Optional[str] = Field(None, description="Playwright resource type")
+    status_code: Optional[int] = Field(None, description="HTTP response status code")
+    failure_text: Optional[str] = Field(None, description="Request failure text")
+    is_first_party: bool = Field(False, description="Whether the URL belongs to the app under test")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the event was observed")
+
+
+class BrowserConsoleEvent(BaseModel):
+    """Normalized browser console event."""
+    model_config = ConfigDict(extra="forbid")
+
+    level: str = Field(..., description="Console severity level")
+    text: str = Field(..., description="Console message text")
+    source_url: Optional[str] = Field(None, description="Originating script URL")
+    line_number: Optional[int] = Field(None, description="Source line number")
+    column_number: Optional[int] = Field(None, description="Source column number")
+    is_first_party: bool = Field(False, description="Whether the source belongs to the app under test")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the event was observed")
+
+
+class BrowserPageErrorEvent(BaseModel):
+    """Unhandled page error surfaced by Playwright."""
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(..., description="Page error message")
+    stack: Optional[str] = Field(None, description="Stack trace if available")
+    is_first_party: bool = Field(True, description="Whether the source belongs to the app under test")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the error was observed")
+
+
+class BrowserWebSocketEvent(BaseModel):
+    """Normalized websocket lifecycle event."""
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str = Field(
+        ...,
+        description="Lifecycle event type: open, framesent, framereceived, or close",
+    )
+    url: str = Field(..., description="Websocket URL")
+    payload_preview: Optional[str] = Field(
+        None,
+        description="Optional preview of a websocket payload",
+    )
+    payload_size: Optional[int] = Field(
+        None,
+        description="Best-effort payload size in bytes or characters",
+    )
+    is_first_party: bool = Field(
+        False,
+        description="Whether the websocket belongs to the app under test",
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now,
+        description="When the websocket event was observed",
+    )
+
+
+class BrowserIdentityContext(BaseModel):
+    """Correlation identifiers extracted from the browser session."""
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: Optional[str] = Field(None, description="Authenticated user ID")
+    conversation_id: Optional[str] = Field(None, description="Conversation/session ID")
+    extraction_source: str = Field(
+        "unavailable",
+        description="How the correlation identifiers were extracted",
+    )
+    auth_session_url: Optional[str] = Field(
+        None,
+        description="Auth session endpoint used for fallback extraction",
+    )
+
+
+class BrowserTurnDiagnostic(BaseModel):
+    """Per-turn diagnostics for browser scenarios."""
+    model_config = ConfigDict(extra="forbid")
+
+    turn_index: int = Field(..., description="Turn index in the browser loop")
+    planned_reasoning: str = Field("", description="Planner reasoning for the action")
+    planned_action: Optional[BrowserAction] = Field(
+        None,
+        description="Browser action chosen for this turn",
+    )
+    page_url_before: Optional[str] = Field(None, description="URL before the action")
+    page_title_before: Optional[str] = Field(None, description="Page title before the action")
+    page_url_after: Optional[str] = Field(None, description="URL after the action")
+    page_title_after: Optional[str] = Field(None, description="Page title after the action")
+    action_success: bool = Field(..., description="Whether the action succeeded")
+    action_message: str = Field(..., description="Human-readable action outcome")
+    error: Optional[str] = Field(None, description="Action or turn error")
+    screenshot_paths: List[str] = Field(
+        default_factory=list,
+        description="Screenshots captured for this turn",
+    )
+    network_event_indexes: List[int] = Field(
+        default_factory=list,
+        description="Indexes into BrowserScenarioDiagnostics.network_events for this turn",
+    )
+    console_event_indexes: List[int] = Field(
+        default_factory=list,
+        description="Indexes into BrowserScenarioDiagnostics.console_events for this turn",
+    )
+    page_error_indexes: List[int] = Field(
+        default_factory=list,
+        description="Indexes into BrowserScenarioDiagnostics.page_errors for this turn",
+    )
+    websocket_event_indexes: List[int] = Field(
+        default_factory=list,
+        description="Indexes into BrowserScenarioDiagnostics.websocket_events for this turn",
+    )
+    observation_excerpt: str = Field(
+        "",
+        description="Compact excerpt of the post-action observation",
+    )
+
+
+class BrowserScenarioDiagnostics(BaseModel):
+    """Structured diagnostics captured during browser execution."""
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_name: str = Field(..., description="Scenario name")
+    goal: str = Field(..., description="Replicant goal")
+    start_url: str = Field(..., description="Scenario start URL")
+    started_at: datetime = Field(..., description="When browser execution started")
+    completed_at: Optional[datetime] = Field(None, description="When browser execution completed")
+    environment: Optional[str] = Field(None, description="Execution environment label")
+    artifact_dir: Optional[str] = Field(None, description="Artifact directory for the scenario")
+    trace_path: Optional[str] = Field(None, description="Trace path if captured")
+    identity: BrowserIdentityContext = Field(
+        default_factory=BrowserIdentityContext,
+        description="Correlation identifiers for this run",
+    )
+    turns: List[BrowserTurnDiagnostic] = Field(
+        default_factory=list,
+        description="Per-turn diagnostics",
+    )
+    network_events: List[BrowserNetworkEvent] = Field(
+        default_factory=list,
+        description="Normalized network events",
+    )
+    console_events: List[BrowserConsoleEvent] = Field(
+        default_factory=list,
+        description="Browser console events",
+    )
+    page_errors: List[BrowserPageErrorEvent] = Field(
+        default_factory=list,
+        description="Unhandled page errors",
+    )
+    websocket_events: List[BrowserWebSocketEvent] = Field(
+        default_factory=list,
+        description="Observed websocket activity",
+    )
+
+
+class LogfireRecord(BaseModel):
+    """A compact Logfire record excerpt."""
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: str = Field(..., description="Record timestamp")
+    level: Optional[str] = Field(None, description="Log level")
+    message: Optional[str] = Field(None, description="Human-readable message")
+    span_name: Optional[str] = Field(None, description="Logfire span name")
+    trace_id: Optional[str] = Field(None, description="Trace ID")
+    attributes: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured attributes associated with the record",
+    )
+
+
+class LogfireExcerpt(BaseModel):
+    """Query metadata and compact results from Logfire."""
+    model_config = ConfigDict(extra="forbid")
+
+    query_window_start: Optional[str] = Field(None, description="Start of the query window")
+    query_window_end: Optional[str] = Field(None, description="End of the query window")
+    query_sql: Optional[str] = Field(None, description="Rendered SQL used for the query")
+    fetched: bool = Field(False, description="Whether the query succeeded")
+    unavailable_reason: Optional[str] = Field(None, description="Why logs are unavailable")
+    records: List[LogfireRecord] = Field(
+        default_factory=list,
+        description="Compact Logfire records",
+    )
+
+
+class IssueArtifactLink(BaseModel):
+    """Artifact metadata for issue generation."""
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(..., description="Artifact type such as screenshot or trace")
+    label: str = Field(..., description="Human-readable artifact label")
+    local_path: str = Field(..., description="Local filesystem path")
+    uploaded_url: Optional[str] = Field(None, description="Uploaded or signed URL")
+
+
+class IssueClassification(BaseModel):
+    """Classifier output for a browser issue candidate."""
+    model_config = ConfigDict(extra="forbid")
+
+    decision: IssueDecision = Field(..., description="Classifier decision")
+    confidence: float = Field(..., description="Classifier confidence from 0 to 1")
+    subtypes: List[str] = Field(
+        default_factory=list,
+        description="Normalized subtype labels",
+    )
+    fingerprint: str = Field(..., description="Deterministic issue fingerprint")
+    summary: str = Field(..., description="Short issue summary")
+    reasons: List[str] = Field(
+        default_factory=list,
+        description="Human-readable rationale for the decision",
+    )
+    relevant_turn_indexes: List[int] = Field(
+        default_factory=list,
+        description="Turn indexes relevant to the issue summary",
+    )
+
+
+class IssueBundle(BaseModel):
+    """Standalone issue bundle written to disk for browser scenarios."""
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_name: str = Field(..., description="Scenario name")
+    scenario_file: Optional[str] = Field(None, description="Source YAML path")
+    repo_target: str = Field(..., description="Repository to file against")
+    goal: str = Field(..., description="Replicant goal")
+    environment: Optional[str] = Field(None, description="Execution environment label")
+    generated_at: datetime = Field(default_factory=datetime.now, description="When the bundle was generated")
+    scenario_passed: bool = Field(..., description="Whether the scenario passed")
+    scenario_error: Optional[str] = Field(None, description="Top-level scenario error")
+    classification: IssueClassification = Field(..., description="Classifier output")
+    diagnostics: BrowserScenarioDiagnostics = Field(..., description="Browser diagnostics for the scenario")
+    artifact_links: List[IssueArtifactLink] = Field(
+        default_factory=list,
+        description="Artifacts referenced by the issue bundle",
+    )
+    logfire_excerpt: Optional[LogfireExcerpt] = Field(
+        None,
+        description="Server-side log excerpt if fetched",
+    )
+    issue_title: str = Field(..., description="Rendered issue title")
+    issue_body: str = Field(..., description="Rendered issue body markdown")
+
+
 class GoalEvaluationResult(BaseModel):
     """Result of goal evaluation."""
     model_config = ConfigDict(extra="forbid")
@@ -259,6 +542,7 @@ class StepResult(BaseModel):
     # Browser mode specific fields (optional)
     action_type: Optional[str] = Field(None, description="Action type in browser mode (e.g., click, send_chat)")
     action_summary: Optional[str] = Field(None, description="Summary of browser action performed")
+    planner_reasoning: Optional[str] = Field(None, description="Planner reasoning for the chosen browser action")
     page_url: Optional[str] = Field(None, description="Current page URL in browser mode")
     observation_excerpt: Optional[str] = Field(None, description="Excerpt from page observation")
     artifact_paths: Dict[str, str] = Field(
@@ -418,10 +702,35 @@ class ScenarioReport(BaseModel):
     failed_steps: int = Field(..., description="Number of steps that failed")
     total_duration_ms: float = Field(..., description="Total execution time in milliseconds")
     step_results: List[StepResult] = Field(default_factory=list, description="Results for each step")
+    source_file: Optional[str] = Field(None, description="Scenario YAML file path")
     error: Optional[str] = Field(None, description="Overall error message if scenario failed")
     conversation_history: Optional[str] = Field(None, description="Complete conversation history for agent scenarios")
     justification: Optional[str] = Field(None, description="Explanation of why the scenario passed or failed")
     goal_evaluation_result: Optional[GoalEvaluationResult] = Field(None, description="Goal evaluation result for agent scenarios")
+    artifact_summary: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Artifact summary for the scenario",
+    )
+    browser_diagnostics: Optional[BrowserScenarioDiagnostics] = Field(
+        None,
+        description="Structured browser diagnostics for browser scenarios",
+    )
+    issue_classification: Optional[IssueClassification] = Field(
+        None,
+        description="Issue classifier output if issue processing was run",
+    )
+    issue_bundle_path: Optional[str] = Field(
+        None,
+        description="Path to the issue bundle on disk",
+    )
+    issue_markdown_path: Optional[str] = Field(
+        None,
+        description="Path to the rendered issue markdown draft",
+    )
+    issue_url: Optional[str] = Field(
+        None,
+        description="Created or updated issue URL",
+    )
     started_at: datetime = Field(default_factory=datetime.now, description="When scenario started")
     completed_at: Optional[datetime] = Field(None, description="When scenario completed")
     

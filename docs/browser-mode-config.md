@@ -4,6 +4,12 @@
 
 Browser mode allows ReplicantX to test web applications using Playwright browser automation. The agent can interact with web pages naturally through chat, clicking buttons, and filling forms.
 
+It also supports standalone browser issue triage from the CLI:
+- capture structured issue bundles for failed or suspicious browser runs
+- optionally enrich them with Logfire excerpts
+- optionally auto-file high-confidence GitHub issues
+- continue the Replicant flow when non-blocking app errors occur and the goal is still achievable
+
 ## Complete Configuration Example
 
 ```yaml
@@ -86,6 +92,126 @@ replicant:
 ### Interaction Mode
 - `api` (default) - HTTP API mode
 - `browser` - Playwright browser automation
+
+## Standalone Issue Triage and GitHub Autofiling
+
+Issue processing is controlled from the CLI, not the YAML scenario. Existing browser scenarios work as-is.
+
+### CLI Options
+
+```bash
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --issue-artifact-upload off \
+  --issue-output artifacts/issues
+```
+
+```bash
+replicantx run tests/browser_test.yaml \
+  --issue-mode auto-high-confidence \
+  --issue-repo HelixTechnologies/helix-agent
+```
+
+```bash
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --logfire-config replicantx.logfire.yaml
+```
+
+Available options:
+- `--issue-mode off|auto-high-confidence|draft-only`
+- `--issue-repo owner/name`
+- `--issue-artifact-upload on|off`
+- `--issue-output <dir>`
+- `--logfire-config <path>`
+
+### How Issue Processing Behaves
+
+- Browser runs always continue if the Replicant can keep making progress.
+- First-party `401`, `403`, `500`, console errors, and page errors are recorded as diagnostics rather than immediately stopping the run.
+- A scenario can pass and still produce an issue bundle or GitHub issue if the bug did not block the user flow.
+
+Classifier decisions:
+- `auto_file`: high-confidence app bug
+- `review`: suspicious but ambiguous
+- `skip`: likely automation or Playwright limitation
+
+What happens for each decision:
+- `auto_file`: writes local bundle and, in `auto-high-confidence` mode, creates or updates a GitHub issue
+- `review`: writes local bundle and markdown draft only
+- `skip`: writes local bundle for reference only; no GitHub issue
+
+### Output Files
+
+Issue artifacts are written under `--issue-output/<scenario-slug>/`:
+- `issue_bundle.json`: structured diagnostics, classification, artifacts, issue body, and Logfire excerpt
+- `issue.md`: rendered GitHub issue markdown draft
+
+Browser traces and screenshots remain in the scenario artifact directory and are linked from the bundle.
+
+### Environment Variables
+
+```bash
+# GitHub filing
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token
+
+# Logfire enrichment
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_BASE_URL=https://logfire-api.pydantic.dev  # optional
+REPLICANTX_LOGFIRE_SERVICE_NAME=helix-api                     # optional
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml            # optional
+
+# Supabase artifact upload
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+REPLICANTX_ARTIFACT_BUCKET=replicantx-artifacts               # optional
+REPLICANTX_ARTIFACT_SIGNED_URL_TTL_SECONDS=604800             # optional
+
+# Optional label included in issue bundles/issues
+REPLICANTX_ENVIRONMENT=staging
+```
+
+Notes:
+- If you want purely local issue drafts, use `--issue-artifact-upload off`.
+- Artifact uploads use private Supabase Storage with signed URLs.
+- GitHub issue dedupe is based on a deterministic fingerprint embedded in the issue body.
+- Logfire query config is auto-discovered from `replicantx.logfire.yaml` or `replicantx.logfire.yml` if present.
+
+### Configurable Logfire Query
+
+Different products often use different Logfire attribute names. ReplicantX supports a repo-specific YAML query definition instead of hardcoding those mappings in Python.
+
+Example `replicantx.logfire.yaml`:
+
+```yaml
+service_name: product-api
+static_filters:
+  - "service_name = {service_name}"
+  - "attributes->>'tenant' = 'acme'"
+correlation_joiner: and
+correlation_rules:
+  - identity_field: user_id
+    expressions:
+      - "attributes->>'actor_id' = {value}"
+      - "attributes->>'user_id' = {value}"
+    combine_with: or
+  - identity_field: conversation_id
+    expressions:
+      - "attributes->>'session_key' = {value}"
+time_window:
+  before_seconds: 30
+  after_seconds: 45
+limit: 10
+```
+
+Supported placeholders:
+- `{value}`
+- `{service_name}`
+- `{environment}`
+- `{user_id}`
+- `{conversation_id}`
+
+See [../replicantx.logfire.example.yaml](../replicantx.logfire.example.yaml) for a ready-to-copy example.
 
 ### Goal Evidence Modes
 
@@ -205,6 +331,8 @@ auth:
 4. **Use `trace: retain-on-failure`** - Helps investigate failures
 5. **Keep `headless: true`** in CI/CD, use `false` locally for debugging
 6. **Use `domain_allowlist`** - Prevent navigation to unexpected sites
+7. **Use `draft-only` first** - Validate your classifier output locally before enabling GitHub autofiling
+8. **Turn artifact upload off for local-only work** - Use `--issue-artifact-upload off` when you do not need signed URLs
 
 ## Example Use Cases
 

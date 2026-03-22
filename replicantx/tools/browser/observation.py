@@ -110,6 +110,21 @@ async def extract_interactive_elements(
         """(chatAreaSelector) => {
             const collected = [];
             window.__rx_elements = [];
+            const topLayerSelectors = [
+                '[aria-modal="true"]',
+                '[role="alertdialog"]',
+                '[role="dialog"]',
+                '[role="listbox"]',
+                '[role="menu"]',
+                '[data-radix-popper-content-wrapper]',
+                '[data-state="open"]',
+                '[class*="modal"]',
+                '[class*="dialog"]',
+                '[class*="drawer"]',
+                '[class*="sheet"]',
+                '[class*="popover"]',
+            ];
+            const topLayerSelector = topLayerSelectors.join(',');
 
             const selectors = [
                 'button:not([disabled])',
@@ -117,6 +132,7 @@ async def extract_interactive_elements(
                 'input:not([disabled])',
                 'textarea:not([disabled])',
                 'select:not([disabled])',
+                '[role="combobox"]',
                 '[role="button"]',
                 '[role="link"]',
                 '[role="menuitem"]',
@@ -125,11 +141,62 @@ async def extract_interactive_elements(
                 '[role="radio"]',
                 '[role="option"]',
                 '[role="listbox"] > *',
+                '[aria-autocomplete]',
+                '[contenteditable="true"]',
                 'li[data-option]',
                 'div[class*="option"]',
             ];
 
             const seen = new Set();
+            const parseZIndex = (value) => {
+                const parsed = Number.parseInt(value || '', 10);
+                return Number.isFinite(parsed) ? parsed : 0;
+            };
+            const isVisible = (node) => {
+                if (!(node instanceof HTMLElement)) return false;
+                const rect = node.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) return false;
+                const style = window.getComputedStyle(node);
+                if (style.visibility === 'hidden' || style.display === 'none') return false;
+                if (style.opacity === '0') return false;
+                return true;
+            };
+            const surfaceCandidates = Array.from(document.querySelectorAll(topLayerSelector))
+                .filter(isVisible)
+                .map((node) => {
+                    const rect = node.getBoundingClientRect();
+                    const style = window.getComputedStyle(node);
+                    const centerX = Math.min(
+                        window.innerWidth - 1,
+                        Math.max(0, rect.left + rect.width / 2)
+                    );
+                    const centerY = Math.min(
+                        window.innerHeight - 1,
+                        Math.max(0, rect.top + rect.height / 2)
+                    );
+                    const hit = document.elementFromPoint(centerX, centerY);
+                    const role = node.getAttribute('role') || '';
+                    const area = rect.width * rect.height;
+
+                    let score = parseZIndex(style.zIndex);
+                    if (node.getAttribute('aria-modal') === 'true') score += 500;
+                    if (role === 'alertdialog') score += 420;
+                    else if (role === 'dialog') score += 360;
+                    else if (role === 'listbox' || role === 'menu') score += 240;
+                    if (style.position === 'fixed') score += 80;
+                    else if (style.position === 'absolute') score += 40;
+                    if (hit instanceof HTMLElement && (node === hit || node.contains(hit) || hit.contains(node))) {
+                        score += 120;
+                    }
+                    score += Math.min(120, area / 15000);
+                    return { node, score };
+                })
+                .sort((a, b) => b.score - a.score);
+            const activeSurface = surfaceCandidates[0]?.node || null;
+            const activeSurfaceElements = activeSurface
+                ? Array.from(activeSurface.querySelectorAll(selectors.join(','))).filter(isVisible)
+                : [];
+            const hasActiveSurfaceElements = activeSurfaceElements.length > 0;
 
             selectors.forEach(selector => {
                 document.querySelectorAll(selector).forEach(node => {
@@ -137,7 +204,7 @@ async def extract_interactive_elements(
                     seen.add(node);
 
                     const rect = node.getBoundingClientRect();
-                    if (rect.width <= 0 || rect.height <= 0) return;
+                    if (!isVisible(node)) return;
 
                     let name = node.getAttribute('aria-label') || '';
                     if (!name && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
@@ -153,11 +220,50 @@ async def extract_interactive_elements(
                         if (label) name = label.innerText || '';
                         if (!name) name = node.getAttribute('name') || '';
                     }
+                    if (!name && (node.getAttribute('role') === 'combobox' || node.hasAttribute('aria-autocomplete'))) {
+                        name = node.getAttribute('aria-label') || node.getAttribute('placeholder') || '';
+                    }
                     if (!name) name = (node.innerText || node.textContent || '');
                     name = name.trim().replace(/\\s+/g, ' ').slice(0, 100);
                     if (!name) return;
 
                     let role = node.getAttribute('role') || node.tagName.toLowerCase();
+                    const placeholder = (node.getAttribute('placeholder') || '').trim().slice(0, 100);
+                    const rawValue =
+                        ('value' in node && typeof node.value === 'string' && node.value) ||
+                        node.getAttribute('aria-valuetext') ||
+                        node.getAttribute('data-value') ||
+                        '';
+                    const currentValue = String(rawValue).trim().replace(/\\s+/g, ' ').slice(0, 100);
+                    const isTypeahead =
+                        role === 'combobox' ||
+                        node.tagName === 'SELECT' ||
+                        node.hasAttribute('aria-autocomplete') ||
+                        node.getAttribute('aria-haspopup') === 'listbox' ||
+                        node.closest('[role="combobox"]') !== null;
+                    const isRequired = (() => {
+                        if (node.hasAttribute('required')) return true;
+                        if (node.getAttribute('aria-required') === 'true') return true;
+                        // Check associated label text for a * or "required" hint
+                        const labelEl = (node.labels && node.labels[0]) ||
+                            (node.id ? document.querySelector(`label[for="${CSS.escape(node.id)}"]`) : null);
+                        if (labelEl) {
+                            const labelText = labelEl.textContent || '';
+                            if (labelText.includes('*') || /\\brequired\\b/i.test(labelText)) return true;
+                        }
+                        // Also check nearby sibling text nodes for a * marker
+                        const parent = node.parentElement;
+                        if (parent) {
+                            const parentText = parent.textContent || '';
+                            if (parentText.includes('*')) return true;
+                        }
+                        return false;
+                    })();
+                    const expandedAttr = node.getAttribute('aria-expanded');
+                    const isExpanded = expandedAttr == null ? null : expandedAttr === 'true';
+                    const inActiveSurface =
+                        activeSurface instanceof HTMLElement && activeSurface.contains(node);
+                    const layerHost = node.closest(topLayerSelector);
 
                     let score = 0;
                     if (chatAreaSelector) {
@@ -175,13 +281,28 @@ async def extract_interactive_elements(
                     }
                     if (role === 'button' || node.tagName === 'BUTTON') score += 20;
                     else if (role === 'link' || node.tagName === 'A') score += 10;
+                    else if (role === 'combobox' || node.tagName === 'SELECT') score += 18;
+                    else if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') score += 12;
 
                     const nl = name.toLowerCase();
                     if (nl.includes('submit') || nl.includes('confirm') || nl.includes('continue'))
                         score += 15;
+                    if (isTypeahead) score += 8;
                     if (nl.includes('skip') || nl.includes('cancel') ||
                         node.closest('nav') || node.closest('footer'))
                         score -= 10;
+                    if (hasActiveSurfaceElements) {
+                        if (inActiveSurface) {
+                            score += 220;
+                        } else if (
+                            layerHost instanceof HTMLElement &&
+                            ['option', 'menuitem'].includes(role)
+                        ) {
+                            score += 140;
+                        } else {
+                            score -= 120;
+                        }
+                    }
 
                     // Store the DOM node reference for action execution
                     const idx = window.__rx_elements.length;
@@ -191,6 +312,11 @@ async def extract_interactive_elements(
                         tagName: node.tagName,
                         role: role,
                         name: name,
+                        placeholder: placeholder || null,
+                        currentValue: currentValue || null,
+                        isTypeahead: isTypeahead,
+                        isExpanded: isExpanded,
+                        isRequired: isRequired,
                         score: score,
                         idx: idx,
                     });
@@ -211,6 +337,11 @@ async def extract_interactive_elements(
                 role=elem_data["role"],
                 name=elem_data["name"],
                 tag_name=elem_data["tagName"],
+                placeholder=elem_data.get("placeholder"),
+                current_value=elem_data.get("currentValue"),
+                is_typeahead=bool(elem_data.get("isTypeahead", False)),
+                is_expanded=elem_data.get("isExpanded"),
+                is_required=bool(elem_data.get("isRequired", False)),
             )
         )
 

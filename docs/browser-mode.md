@@ -52,6 +52,12 @@ Support two evidence types:
 * Iterate until goal achieved OR max_turns reached
 * Must avoid “stuck loops” (repeating same click / same chat message) via simple repetition detection
 
+### 3.4 Non-blocking issue capture
+
+* First-party browser issues such as `401`, `403`, `5xx`, console errors, and page errors should be recorded as diagnostics.
+* These signals should **not** automatically stop the Replicant if the user flow is still progressing.
+* A scenario may still pass while emitting an issue bundle or GitHub issue for a non-blocking bug.
+
 ---
 
 ## 4) Configuration changes (YAML + Pydantic models)
@@ -344,12 +350,20 @@ If you want to avoid changing the model, map:
 
 ## 11) CLI changes
 
-Add flags (override YAML):
+Current CLI flags for standalone issue processing:
 
-* `--headed / --headless`
-* `--trace {off,retain-on-failure,on}`
-* `--screenshot-each-turn`
-* `--browser-timeout N`
+* `--issue-mode {off,auto-high-confidence,draft-only}`
+* `--issue-repo owner/name`
+* `--issue-artifact-upload {on,off}`
+* `--issue-output DIR`
+
+Current browser runtime settings remain YAML-configured:
+
+* `browser.headless`
+* `browser.trace`
+* `browser.screenshot_on_each_turn`
+* `browser.navigation_timeout_seconds`
+* `browser.action_timeout_seconds`
 
 Keep current execution model. You’re running one at a time now, so no special concurrency work required.
 
@@ -438,5 +452,4 @@ replicant:
 * Even if you “try without testids first”, add a **single** optional selector override mechanism (like the `ui.chat_input` example). It lets you harden Helix later without rewriting ReplicantX.
 * Default to **DOM-first evaluation**, screenshot only when needed (cost + speed).
 * Make the agent action space *small and typed* (tool calls), not “write Playwright code”.
-
 

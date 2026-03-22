@@ -31,7 +31,15 @@ except ImportError:
     pass
 
 from . import __version__
-from .models import ScenarioConfig, TestSuiteReport, TestLevel, InteractionMode
+from .issue_reporting import IssueProcessingConfig, IssueProcessor
+from .models import (
+    InteractionMode,
+    IssueArtifactUploadMode,
+    IssueMode,
+    ScenarioConfig,
+    TestLevel,
+    TestSuiteReport,
+)
 from .scenarios import BasicScenarioRunner, AgentScenarioRunner, BrowserScenarioRunner
 from .reporters import MarkdownReporter, JSONReporter
 
@@ -93,6 +101,31 @@ def run(
     max_concurrent: Optional[int] = typer.Option(
         None, "--max-concurrent", help="Maximum number of scenarios to run concurrently (default: unlimited)"
     ),
+    issue_mode: IssueMode = typer.Option(
+        IssueMode.OFF,
+        "--issue-mode",
+        help="Browser issue handling mode: off, auto-high-confidence, or draft-only",
+    ),
+    issue_repo: str = typer.Option(
+        "HelixTechnologies/helix-agent",
+        "--issue-repo",
+        help="GitHub repository to file issues against, in owner/name format",
+    ),
+    issue_artifact_upload: IssueArtifactUploadMode = typer.Option(
+        IssueArtifactUploadMode.ON,
+        "--issue-artifact-upload",
+        help="Whether to upload issue artifacts when issue processing is enabled",
+    ),
+    issue_output: str = typer.Option(
+        "artifacts/issues",
+        "--issue-output",
+        help="Directory to write issue bundles and markdown drafts",
+    ),
+    logfire_config: Optional[str] = typer.Option(
+        None,
+        "--logfire-config",
+        help="Optional path to a Logfire query YAML config. Defaults to replicantx.logfire.yaml if present.",
+    ),
 ):
     """Run test scenarios from YAML files.
 
@@ -106,6 +139,9 @@ EXAMPLES:
   replicantx run tests/agent_test.yaml --watch --debug
   replicantx run tests/*.yaml --ci --report results.json
   replicantx run tests/*.yaml --parallel --max-concurrent 3
+  replicantx run tests/browser_test.yaml --issue-mode draft-only --issue-artifact-upload off
+  replicantx run tests/browser_test.yaml --issue-mode auto-high-confidence --issue-repo HelixTechnologies/helix-agent
+  replicantx run tests/browser_test.yaml --issue-mode draft-only --logfire-config replicantx.logfire.yaml
     """
     console.print(f"🚀 ReplicantX {__version__} - Starting test execution")
     
@@ -144,6 +180,11 @@ EXAMPLES:
         max_retries_override=max_retries,
         parallel=parallel,
         max_concurrent=max_concurrent,
+        issue_mode=issue_mode,
+        issue_repo=issue_repo,
+        issue_artifact_upload=issue_artifact_upload,
+        issue_output=issue_output,
+        logfire_config=logfire_config,
     ))
 
 
@@ -158,6 +199,11 @@ async def run_scenarios_async(
     max_retries_override: Optional[int] = None,
     parallel: bool = False,
     max_concurrent: Optional[int] = None,
+    issue_mode: IssueMode = IssueMode.OFF,
+    issue_repo: str = "HelixTechnologies/helix-agent",
+    issue_artifact_upload: IssueArtifactUploadMode = IssueArtifactUploadMode.ON,
+    issue_output: str = "artifacts/issues",
+    logfire_config: Optional[str] = None,
 ):
     """Run scenarios asynchronously."""
     # Initialize test suite report
@@ -232,9 +278,21 @@ async def run_scenarios_async(
     
     # Finalize report
     suite_report.completed_at = datetime.now()
-    
+
+    if issue_mode != IssueMode.OFF:
+        issue_config = IssueProcessingConfig.from_runtime(
+            issue_mode=issue_mode,
+            issue_repo=issue_repo,
+            artifact_upload_mode=issue_artifact_upload,
+            issue_output_dir=issue_output,
+            logfire_config_path=logfire_config,
+        )
+        processor = IssueProcessor(config=issue_config)
+        await processor.process_suite(suite_report.scenario_reports)
+
     # Display summary
     display_summary(suite_report, verbose)
+    display_issue_summary(suite_report, issue_mode)
     
     # Generate reports
     if report_path:
@@ -279,6 +337,7 @@ async def run_scenarios_sequential(
 
             # Run the scenario
             scenario_report = await runner.run()
+            scenario_report.source_file = file_path
             suite_report.scenario_reports.append(scenario_report)
 
             # Update counters
@@ -420,6 +479,7 @@ async def _execute_scenario(
 
     # Run the scenario
     scenario_report = await runner.run()
+    scenario_report.source_file = file_path
 
     return {
         'file_path': file_path,
@@ -570,6 +630,50 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
                         console.print(f"💭 {scenario.justification}")
                     if scenario.error:
                         console.print(f"❌ Error: {scenario.error}")
+
+
+def display_issue_summary(
+    suite_report: TestSuiteReport,
+    issue_mode: IssueMode,
+) -> None:
+    """Display issue processing results when enabled."""
+    if issue_mode == IssueMode.OFF:
+        return
+
+    processed = [
+        scenario
+        for scenario in suite_report.scenario_reports
+        if scenario.issue_classification is not None
+    ]
+    if not processed:
+        console.print("\n🪲 Issue Processing")
+        console.print("No browser scenarios produced issue bundles.")
+        return
+
+    console.print("\n🪲 Issue Processing")
+    table = Table(show_header=True, header_style="bold blue")
+    table.add_column("Scenario")
+    table.add_column("Decision")
+    table.add_column("Bundle")
+    table.add_column("Issue")
+
+    for scenario in processed:
+        decision = scenario.issue_classification.decision.value
+        bundle = scenario.issue_bundle_path or "n/a"
+        issue = scenario.issue_url or (
+            "draft only"
+            if scenario.issue_classification.decision.value == "auto_file"
+            and issue_mode == IssueMode.DRAFT_ONLY
+            else "not filed"
+        )
+        table.add_row(
+            scenario.scenario_name,
+            decision,
+            bundle,
+            issue,
+        )
+
+    console.print(table)
 
 
 def generate_reports(suite_report: TestSuiteReport, report_path: str):

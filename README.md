@@ -25,6 +25,7 @@
 - **Automatic .env Loading**: No manual environment variable sourcing required
 - **GitHub Actions Ready**: Built-in workflow for PR testing with Render preview URLs
 - **Rich Reporting**: Markdown and JSON reports with timing and assertion results
+- **Standalone Issue Triage**: Write browser issue bundles locally and optionally auto-file high-confidence GitHub issues from the CLI
 - **Playwright Tracing**: Capture browser traces for debugging with `playwright show-trace`
 - **Retry & Backoff**: Robust HTTP client with automatic retry logic
 
@@ -200,9 +201,124 @@ replicantx run tests/browser_test.yaml --watch
 # Run with debug mode (see technical details)
 replicantx run tests/browser_test.yaml --debug
 
-# Run headed (watch browser in action)
-replicantx run tests/browser_test.yaml --headed
+# Watch the actual browser window
+# set replicant.browser.headless: false in the YAML, then run:
+replicantx run tests/browser_test.yaml --watch
 ```
+
+#### Browser Issue Triage and GitHub Autofiling
+
+ReplicantX can now capture browser issues during standalone CLI runs without relying on GitHub Actions.
+
+Important behavior:
+- A first-party `401`, `500`, console error, or page error does **not** automatically stop the Replicant.
+- If the browser flow is still progressing, the Replicant continues trying to complete the goal.
+- A scenario can therefore **pass** and still produce an issue bundle or GitHub issue for a non-blocking bug.
+
+No scenario YAML changes are required for this. Enable it from the CLI:
+
+```bash
+# Local draft only: write issue.md + issue_bundle.json, do not file GitHub issues
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --issue-artifact-upload off \
+  --issue-output artifacts/issues
+
+# Auto-file high-confidence issues directly to GitHub
+replicantx run tests/browser_test.yaml \
+  --issue-mode auto-high-confidence \
+  --issue-repo HelixTechnologies/helix-agent
+
+# Use a repo-specific Logfire query definition
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --logfire-config replicantx.logfire.yaml
+```
+
+Issue handling modes:
+- `off`: do not run issue processing
+- `draft-only`: write local issue drafts and bundles only
+- `auto-high-confidence`: auto-file `auto_file` issues and keep local bundles for everything processed
+
+What gets written to `--issue-output`:
+- `issue_bundle.json`: structured diagnostics, classification, artifacts, and Logfire excerpt
+- `issue.md`: rendered GitHub issue body draft
+- Browser artifacts remain in the normal scenario artifact directory and are linked from the bundle
+
+Classifier outcomes:
+- `auto_file`: high-confidence app bug, eligible for GitHub filing in `auto-high-confidence` mode
+- `review`: suspicious or ambiguous issue, bundle written locally but no GitHub issue created
+- `skip`: likely automation/control limitation, bundle written locally for reference but no GitHub issue created
+
+Integration environment variables:
+
+```bash
+# GitHub issue creation
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token
+
+# Logfire enrichment
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_BASE_URL=https://logfire-api.pydantic.dev   # optional
+REPLICANTX_LOGFIRE_SERVICE_NAME=helix-api                      # optional
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml             # optional
+
+# Artifact uploads (private Supabase Storage + signed URLs)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+REPLICANTX_ARTIFACT_BUCKET=replicantx-artifacts                # optional
+REPLICANTX_ARTIFACT_SIGNED_URL_TTL_SECONDS=604800              # optional
+
+# Optional execution label used in bundles/issues
+REPLICANTX_ENVIRONMENT=staging
+```
+
+Notes:
+- If you want completely local drafts with no artifact upload, use `--issue-artifact-upload off`.
+- Artifact upload is useful for GitHub issues because the issue body can include signed links to the relevant screenshots and traces only.
+- `--issue-repo` must be in `owner/name` format.
+- Logfire query config is auto-discovered from `replicantx.logfire.yaml` or `replicantx.logfire.yml` if present.
+
+#### Configurable Logfire Query
+
+The Logfire query is now configurable so different products can map ReplicantX’s extracted browser identities onto their own Logfire record structure.
+
+Default lookup order:
+- `--logfire-config <path>`
+- `REPLICANTX_LOGFIRE_CONFIG`
+- `replicantx.logfire.yaml`
+- `replicantx.logfire.yml`
+- built-in default query
+
+Example `replicantx.logfire.yaml`:
+
+```yaml
+service_name: product-api
+static_filters:
+  - "service_name = {service_name}"
+  - "attributes->>'tenant' = 'acme'"
+correlation_joiner: and
+correlation_rules:
+  - identity_field: user_id
+    expressions:
+      - "attributes->>'actor_id' = {value}"
+      - "attributes->>'user_id' = {value}"
+    combine_with: or
+  - identity_field: conversation_id
+    expressions:
+      - "attributes->>'session_key' = {value}"
+time_window:
+  before_seconds: 30
+  after_seconds: 45
+limit: 10
+```
+
+Supported placeholders inside query fragments:
+- `{value}`: current identity value for a correlation rule
+- `{service_name}`: configured service name
+- `{environment}`: execution environment label when available
+- `{user_id}` and `{conversation_id}`: extracted browser identity values
+
+See [replicantx.logfire.example.yaml](replicantx.logfire.example.yaml) for a working starting point.
 
 #### Environment Variables
 
@@ -251,6 +367,7 @@ replicant:
 - Model selection strategies
 - Cost optimization tips
 - Trace debugging guide
+- Standalone issue reporting and GitHub autofiling
 - Best practices and examples
 
 ### 🔐 Environment Variables & Configuration
@@ -289,6 +406,11 @@ export SUPABASE_ANON_KEY=your-supabase-anon-key
 # Supabase Service Role Key (for browser mode magic link auth)
 export SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
+# Browser issue triage / autofiling
+export REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token
+export REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+export REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
+
 # Target API Configuration
 export REPLICANTX_TARGET=your-api-domain.com
 
@@ -308,6 +430,9 @@ REPLICANTX_TARGET=dev-api.example.com
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key  # For browser mode
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token  # For CLI GitHub issue filing
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
 EOF
 
 # Just run tests - no need to source .env!
@@ -441,6 +566,9 @@ REPLICANTX_TARGET=https://your-api-domain.com
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key-here
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here  # For browser mode
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token       # For issue autofiling
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
 EOF
 ```
 
@@ -551,6 +679,15 @@ replicantx run tests/*.yaml --parallel
 
 # Run with limited concurrency to prevent API overload
 replicantx run tests/*.yaml --parallel --max-concurrent 3
+
+# Write browser issue bundles locally without filing GitHub issues
+replicantx run tests/browser_test.yaml --issue-mode draft-only --issue-artifact-upload off
+
+# Auto-file high-confidence browser issues to a GitHub repo
+replicantx run tests/browser_test.yaml --issue-mode auto-high-confidence --issue-repo HelixTechnologies/helix-agent
+
+# Override or supply a repo-specific Logfire query definition
+replicantx run tests/browser_test.yaml --issue-mode draft-only --logfire-config replicantx.logfire.yaml
 
 # Validate test files without running
 replicantx validate tests/*.yaml --verbose

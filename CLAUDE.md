@@ -85,8 +85,15 @@ replicantx run tests/*.yaml --watch
 # Run tests in parallel
 replicantx run tests/*.yaml --parallel --max-concurrent 3
 
-# Browser mode: Run headed (watch browser in action)
-replicantx run tests/browser_test.yaml --headed
+# Browser mode: watch the actual browser window
+# set replicant.browser.headless: false in the YAML, then run:
+replicantx run tests/browser_test.yaml --watch
+
+# Browser mode: write local issue drafts only
+replicantx run tests/browser_test.yaml --issue-mode draft-only --issue-artifact-upload off
+
+# Browser mode: auto-file high-confidence issues
+replicantx run tests/browser_test.yaml --issue-mode auto-high-confidence --issue-repo HelixTechnologies/helix-agent
 
 # Browser mode: View traces (after test completes)
 playwright show-trace artifacts/trace.zip
@@ -225,6 +232,18 @@ replicant:
     screenshot_evaluation_model: "openai:gpt-5.2"
 ```
 
+**Standalone browser issue reporting:**
+- Controlled from the CLI, not the scenario YAML
+- `--issue-mode off|draft-only|auto-high-confidence`
+- `--issue-repo owner/name`
+- `--issue-artifact-upload on|off`
+- `--issue-output <dir>`
+- `--logfire-config <path>`
+- Browser runs continue when non-blocking app errors occur and the Replicant can still make progress
+- A scenario can pass and still emit an issue bundle or GitHub issue for a non-blocking bug
+- Issue bundles are written as `issue_bundle.json` plus `issue.md` under the chosen issue output directory
+- Logfire query config is auto-discovered from `replicantx.logfire.yaml` or `replicantx.logfire.yml`
+
 ### Environment Variables
 
 ReplicantX automatically detects environment variables from `.env` files and system environment:
@@ -243,6 +262,16 @@ ReplicantX automatically detects environment variables from `.env` files and sys
 **Target API:**
 - `REPLICANTX_TARGET`: Target API domain
 - `JWT_TOKEN`: JWT token for authentication
+
+**Browser issue reporting:**
+- `REPLICANTX_GITHUB_TOKEN`: GitHub token for standalone issue filing
+- `REPLICANTX_LOGFIRE_API_KEY`: Logfire read token for server-side log enrichment
+- `REPLICANTX_LOGFIRE_BASE_URL`: Optional Logfire API base URL override
+- `REPLICANTX_LOGFIRE_SERVICE_NAME`: Optional Logfire service name override
+- `REPLICANTX_LOGFIRE_CONFIG`: Optional path to a repo-specific Logfire query YAML file
+- `REPLICANTX_ARTIFACT_BUCKET`: Optional Supabase Storage bucket name for uploaded artifacts
+- `REPLICANTX_ARTIFACT_SIGNED_URL_TTL_SECONDS`: Optional signed URL TTL for uploaded artifacts
+- `REPLICANTX_ENVIRONMENT`: Optional environment label included in bundles and issue bodies
 
 **Custom Variables:**
 - Reference in YAML with `{{ env.VARIABLE_NAME }}` syntax
@@ -287,5 +316,5 @@ Rich reporting in multiple formats:
 - Screenshot evaluation requires vision-capable models (GPT-4o, Claude 3.5 Sonnet, etc.)
 - Use `dom_then_screenshot` evidence mode for best cost/accuracy balance
 - Browser traces can be viewed with `playwright show-trace trace.zip`
-- Headed mode (`--headed`) is useful for debugging but should be `headless: true` in CI/CD
+- For a visible browser locally, set `browser.headless: false`; keep `headless: true` in CI/CD
 - Magic link auth auto-generates unique emails (`replicantx+<uuid>@replicantx.org`) when `user_mode: generated`

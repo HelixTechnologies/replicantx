@@ -215,3 +215,4 @@ tests/*.json
 artifacts/
 
 reports/
+replicantx.logfire.helix-agent.example.yaml

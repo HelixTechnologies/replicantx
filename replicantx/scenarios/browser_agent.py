@@ -11,9 +11,10 @@ sending chat messages, etc.
 import asyncio
 import base64
 import json
-from typing import Optional, List
+import os
+from typing import Any, Optional, List, Dict
 from datetime import datetime
-from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, BinaryContent
@@ -30,6 +31,13 @@ from replicantx.models import (
     GoalEvaluationResult,
     InteractionMode,
     GoalEvidenceMode,
+    BrowserScenarioDiagnostics,
+    BrowserIdentityContext,
+    BrowserTurnDiagnostic,
+    BrowserNetworkEvent,
+    BrowserConsoleEvent,
+    BrowserPageErrorEvent,
+    BrowserWebSocketEvent,
 )
 from replicantx.auth.base import AuthBase
 from replicantx.tools.browser import (
@@ -101,6 +109,11 @@ class BrowserScenarioRunner:
 
         self.browser_driver: Optional[BrowserAutomationDriver] = None
         self.artifact_manager: Optional[ArtifactManager] = None
+        self.browser_diagnostics: Optional[BrowserScenarioDiagnostics] = None
+        self._pending_planned_reasoning: Optional[str] = None
+        self._first_party_hosts = self._build_first_party_hosts()
+        self._wait_stuck_threshold_seconds = 20.0
+        self._wait_stuck_min_consecutive_waits = 6
 
     # ------------------------------------------------------------------
     # Main loop
@@ -111,6 +124,15 @@ class BrowserScenarioRunner:
         passed = False
         error = None
         justification = ""
+        artifact_summary: Dict[str, Any] = {}
+
+        self.browser_diagnostics = BrowserScenarioDiagnostics(
+            scenario_name=self.config.name,
+            goal=self.replicant_config.goal,
+            start_url=self.browser_config.start_url,
+            started_at=start_time,
+            environment=os.getenv("REPLICANTX_ENVIRONMENT"),
+        )
 
         try:
             if self.watch:
@@ -133,6 +155,7 @@ class BrowserScenarioRunner:
             )
 
             await self.browser_driver.start()
+            self._attach_diagnostic_listeners()
 
             if hasattr(self.auth_provider, "set_browser_context"):
                 self.auth_provider.set_browser_context(self.browser_driver.get_context())
@@ -145,6 +168,7 @@ class BrowserScenarioRunner:
             self.current_observation = await self.browser_driver.goto(
                 self.browser_config.start_url
             )
+            await self._refresh_identity_context()
 
             # --- observe → plan → act loop (no hardcoded first action) ---
             turn = 0
@@ -170,6 +194,15 @@ class BrowserScenarioRunner:
 
                 # Execute the action
                 result = await self._execute_action_turn(action, turn)
+                await self._refresh_identity_context()
+
+                # Check for stuck loop even after failed actions so we can stop
+                # repeated retries with no useful state change.
+                if self._detect_stuck_loop():
+                    error = "Detected stuck loop (repeated actions with no change)"
+                    if self.watch:
+                        print(f"⚠️  {error}")
+                    break
 
                 if not result.success:
                     if self.watch:
@@ -177,13 +210,6 @@ class BrowserScenarioRunner:
                     # Don't break — let the planner try something else
                     turn += 1
                     continue
-
-                # Check for stuck loop
-                if self._detect_stuck_loop():
-                    error = "Detected stuck loop (repeated actions with no change)"
-                    if self.watch:
-                        print(f"⚠️  {error}")
-                    break
 
                 # Evaluate goal
                 goal_achieved = await self._evaluate_goal()
@@ -211,10 +237,17 @@ class BrowserScenarioRunner:
         finally:
             if self.browser_driver:
                 await self.browser_driver.stop()
+            if self.artifact_manager:
+                artifact_summary = self.artifact_manager.get_artifact_summary()
 
         end_time = datetime.now()
         duration_ms = (end_time - start_time).total_seconds() * 1000
         passed_steps = sum(1 for r in self.step_results if r.passed)
+
+        if self.browser_diagnostics:
+            self.browser_diagnostics.completed_at = end_time
+            self.browser_diagnostics.artifact_dir = artifact_summary.get("scenario_dir")
+            self.browser_diagnostics.trace_path = artifact_summary.get("trace")
 
         return ScenarioReport(
             scenario_name=self.config.name,
@@ -224,9 +257,12 @@ class BrowserScenarioRunner:
             failed_steps=len(self.step_results) - passed_steps,
             total_duration_ms=duration_ms,
             step_results=self.step_results,
+            source_file=None,
             error=error,
             justification=justification,
             goal_evaluation_result=self.goal_evaluation_result,
+            artifact_summary=artifact_summary,
+            browser_diagnostics=self.browser_diagnostics,
             started_at=start_time,
             completed_at=end_time,
         )
@@ -256,9 +292,6 @@ class BrowserScenarioRunner:
             # Build the system instructions
             system_prompt = self._build_planner_system_prompt(initial_message_sent)
 
-            # Build the user message (elements list + action history)
-            user_text = self._build_planner_user_message()
-
             # Resolve model
             model_name = (
                 self.browser_config.planner_model
@@ -278,31 +311,47 @@ class BrowserScenarioRunner:
                 print(f"   Elements: {len(self.current_observation.interactive_elements)}")
                 print(f"   System prompt length: {len(system_prompt)}")
 
-            result = await agent.run(
-                [
-                    user_text,
-                    BinaryContent(data=screenshot_bytes, media_type="image/png"),
-                ]
-            )
+            planner_feedback: Optional[str] = None
+            for _attempt in range(2):
+                user_text = self._build_planner_user_message(
+                    planner_feedback=planner_feedback,
+                )
+                result = await agent.run(
+                    [
+                        user_text,
+                        BinaryContent(data=screenshot_bytes, media_type="image/png"),
+                    ]
+                )
 
-            planned = result.output
+                planned = result.output
+                normalized_action, validation_error = self._normalize_planned_action(
+                    planned
+                )
+                if validation_error:
+                    planner_feedback = validation_error
+                    if self.watch:
+                        print(f"⚠️  Planner feedback: {validation_error}")
+                    continue
 
-            if self.watch:
-                print(f"🧠 Plan: {planned.reasoning}")
-                print(f"   → {planned.action_type}", end="")
-                if planned.target:
-                    print(f" [element {planned.target}]", end="")
-                if planned.value:
-                    val_preview = planned.value[:60] + ("…" if len(planned.value) > 60 else "")
-                    print(f" = \"{val_preview}\"", end="")
-                print()
+                self._pending_planned_reasoning = planned.reasoning
 
-            return BrowserAction(
-                action_type=planned.action_type,
-                target=planned.target,
-                value=planned.value,
-                url=planned.url,
-            )
+                if self.watch:
+                    print(f"🧠 Plan: {planned.reasoning}")
+                    print(f"   → {normalized_action.action_type}", end="")
+                    if normalized_action.target:
+                        print(f" [element {normalized_action.target}]", end="")
+                    if normalized_action.value:
+                        val_preview = normalized_action.value[:60] + (
+                            "…" if len(normalized_action.value) > 60 else ""
+                        )
+                        print(f" = \"{val_preview}\"", end="")
+                    elif normalized_action.direction:
+                        print(f" = \"{normalized_action.direction}\"", end="")
+                    print()
+
+                return normalized_action
+
+            return None
 
         except Exception as e:
             if self.debug:
@@ -345,8 +394,14 @@ class BrowserScenarioRunner:
             "- For click actions, use the element ID from the elements list.",
             "- DROPDOWNS / SELECT BOXES: For dropdown or type-ahead select fields (like category, country, currency),",
             "  use the 'fill' action with the dropdown's element ID and the desired value.",
-            "  The fill action will type the text and automatically select the matching option from the dropdown.",
-            "  Do NOT try to click the dropdown then separately click an option — just use fill.",
+            "  The fill action will first try the dropdown trigger button / combobox chevron and select the matching option.",
+            "  Do NOT rely on free-typing alone when a small dropdown button is visible.",
+            "- If the last action failed because a DOM target went stale, stop trusting the old element reference.",
+            "  Re-orient on the latest screenshot and only use element IDs that appear in the current elements list.",
+            "- If a recent failure says an overlay, drawer, or modal intercepted pointer events,",
+            "  the screen is blocked by an open panel. Close it or interact inside the open panel instead of retrying the blocked click.",
+            "- If an element already shows the value you want in its 'value=' hint, do not fill it again; move to the next required field or submit action.",
+            "- If a field visibly already shows the right value (for example, the month already shows 'Jan'), treat it as complete even if a previous fill action reported failure.",
             "- If a dropdown option is visible in the elements list (role='option'), you can click it directly.",
         ]
 
@@ -359,8 +414,21 @@ class BrowserScenarioRunner:
 
         return "\n".join(lines)
 
-    def _build_planner_user_message(self) -> str:
+    def _build_planner_user_message(
+        self, planner_feedback: Optional[str] = None
+    ) -> str:
         lines = []
+
+        if planner_feedback:
+            lines.append("Planner feedback:")
+            lines.append(f"  {planner_feedback}")
+            lines.append("")
+
+        recovery_guidance = self._build_planner_recovery_guidance()
+        if recovery_guidance:
+            lines.append("Recovery guidance:")
+            lines.extend(f"  - {hint}" for hint in recovery_guidance)
+            lines.append("")
 
         # Current page info
         obs = self.current_observation
@@ -374,7 +442,17 @@ class BrowserScenarioRunner:
                 lines.append("Interactive elements on this page:")
                 for elem in obs.interactive_elements:
                     tag_hint = f" ({elem.tag_name})" if elem.tag_name else ""
-                    lines.append(f"  [{elem.id}] {elem.role}{tag_hint}: {elem.name}")
+                    extra_hints = []
+                    if elem.placeholder:
+                        extra_hints.append(f'placeholder="{elem.placeholder}"')
+                    if elem.current_value:
+                        extra_hints.append(f'value="{elem.current_value}"')
+                    if elem.is_typeahead:
+                        extra_hints.append("typeahead")
+                    if elem.is_expanded is True:
+                        extra_hints.append("expanded")
+                    hint_suffix = f" [{' | '.join(extra_hints)}]" if extra_hints else ""
+                    lines.append(f"  [{elem.id}] {elem.role}{tag_hint}: {elem.name}{hint_suffix}")
             else:
                 lines.append("No interactive elements detected.")
             lines.append("")
@@ -389,11 +467,61 @@ class BrowserScenarioRunner:
             lines.append("Recent actions:")
             for ah in self.action_history[-6:]:
                 status = "✓" if ah["success"] else "✗"
-                lines.append(f"  {status} {ah['action']}: {ah.get('detail', '')}")
+                detail_parts = []
+                if ah.get("detail"):
+                    detail_parts.append(str(ah["detail"]))
+                if ah.get("message"):
+                    detail_parts.append(str(ah["message"]))
+                detail = " -> ".join(part for part in detail_parts if part)
+                lines.append(f"  {status} {ah['action']}: {detail}")
             lines.append("")
 
         lines.append("Decide the next action. Look at the screenshot carefully.")
         return "\n".join(lines)
+
+    def _build_planner_recovery_guidance(self) -> List[str]:
+        guidance: List[str] = []
+        recent_failures = [
+            entry for entry in self.action_history[-4:]
+            if not entry.get("success", True)
+        ]
+        if not recent_failures:
+            return guidance
+
+        failure_messages = " ".join(
+            str(entry.get("message") or "").lower()
+            for entry in recent_failures
+        )
+
+        if any(
+            marker in failure_messages
+            for marker in (
+                "no longer exists in the dom",
+                "stale element",
+                "not attached to the dom",
+                "not in the current elements list",
+            )
+        ):
+            guidance.append(
+                "The previous DOM target went stale. Treat the latest screenshot and current elements list as the source of truth, and do not retry an old element ID unless it still appears now."
+            )
+
+        if any(
+            marker in failure_messages
+            for marker in (
+                "overlay",
+                "modal",
+                "drawer",
+                "dialog",
+                "intercepts pointer events",
+                "blocking interaction",
+            )
+        ):
+            guidance.append(
+                "A visible overlay is likely blocking the background page. Focus on the modal, drawer, or dropdown that is currently open, or dismiss it with a close/cancel control or Escape."
+            )
+
+        return guidance
 
     # ------------------------------------------------------------------
     # Action execution
@@ -402,6 +530,12 @@ class BrowserScenarioRunner:
     async def _execute_action_turn(
         self, action: BrowserAction, turn_index: int
     ) -> BrowserActionResult:
+        before_observation = self.current_observation
+        network_start = len(self.browser_diagnostics.network_events) if self.browser_diagnostics else 0
+        console_start = len(self.browser_diagnostics.console_events) if self.browser_diagnostics else 0
+        page_error_start = len(self.browser_diagnostics.page_errors) if self.browser_diagnostics else 0
+        websocket_start = len(self.browser_diagnostics.websocket_events) if self.browser_diagnostics else 0
+
         if self.watch:
             if action.action_type == "send_chat":
                 print(f"💬 Chat: {action.value}")
@@ -429,6 +563,7 @@ class BrowserScenarioRunner:
             timestamp=datetime.now(),
             action_type=action.action_type,
             action_summary=result.message,
+            planner_reasoning=self._pending_planned_reasoning,
             page_url=result.observation.url if result.observation else None,
             observation_excerpt=self._excerpt_observation(result.observation),
             artifact_paths=(
@@ -447,7 +582,24 @@ class BrowserScenarioRunner:
             {
                 "action": action.action_type,
                 "detail": detail.strip(),
+                "message": self._summarize_action_message(result.message),
                 "success": result.success,
+                "timestamp": datetime.now(),
+                "dom_changed": self._observation_changed_meaningfully(
+                    before_observation,
+                    result.observation,
+                ),
+                "had_activity": self._turn_had_activity(
+                    network_start=network_start,
+                    websocket_start=websocket_start,
+                ),
+                "activity_timestamp": self._latest_turn_activity_timestamp(
+                    network_start=network_start,
+                    websocket_start=websocket_start,
+                ),
+                "page_signature": self._observation_progress_signature(
+                    result.observation,
+                ),
                 "visible_text": (
                     result.observation.visible_text[:200] if result.observation else ""
                 ),
@@ -460,6 +612,45 @@ class BrowserScenarioRunner:
             )
             if screenshot_path:
                 step_result.artifact_paths["failure_screenshot"] = screenshot_path
+
+        issue_screenshot = await self._capture_issue_relevant_screenshot(
+            turn_index=turn_index,
+            action_result=result,
+            network_start=network_start,
+            console_start=console_start,
+            page_error_start=page_error_start,
+        )
+        if issue_screenshot:
+            step_result.artifact_paths["issue_screenshot"] = issue_screenshot
+
+        if self.browser_diagnostics:
+            screenshot_paths = []
+            for key in ("screenshot", "failure_screenshot", "issue_screenshot"):
+                if key in step_result.artifact_paths:
+                    screenshot_paths.append(step_result.artifact_paths[key])
+
+            self.browser_diagnostics.turns.append(
+                BrowserTurnDiagnostic(
+                    turn_index=turn_index,
+                    planned_reasoning=self._pending_planned_reasoning or "",
+                    planned_action=action,
+                    page_url_before=before_observation.url if before_observation else None,
+                    page_title_before=before_observation.title if before_observation else None,
+                    page_url_after=result.observation.url if result.observation else None,
+                    page_title_after=result.observation.title if result.observation else None,
+                    action_success=result.success,
+                    action_message=result.message,
+                    error=result.error,
+                    screenshot_paths=screenshot_paths,
+                    network_event_indexes=list(range(network_start, len(self.browser_diagnostics.network_events))),
+                    console_event_indexes=list(range(console_start, len(self.browser_diagnostics.console_events))),
+                    page_error_indexes=list(range(page_error_start, len(self.browser_diagnostics.page_errors))),
+                    websocket_event_indexes=list(range(websocket_start, len(self.browser_diagnostics.websocket_events))),
+                    observation_excerpt=self._excerpt_observation(result.observation),
+                )
+            )
+
+        self._pending_planned_reasoning = None
 
         if self.watch:
             status = "✅" if result.success else "❌"
@@ -522,27 +713,200 @@ class BrowserScenarioRunner:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _normalize_planned_action(
+        self, planned: PlannedAction
+    ) -> tuple[Optional[BrowserAction], Optional[str]]:
+        action_type = planned.action_type.strip().lower()
+        allowed_action_types = {
+            "click",
+            "fill",
+            "navigate",
+            "press",
+            "scroll",
+            "send_chat",
+            "wait",
+        }
+        if action_type not in allowed_action_types:
+            return None, f"Unsupported action type '{planned.action_type}'."
+
+        target = planned.target.strip() if planned.target else None
+        value = planned.value.strip() if planned.value else None
+        url = planned.url.strip() if planned.url else None
+
+        available_element_ids = {
+            element.id for element in self.current_observation.interactive_elements
+        } if self.current_observation else set()
+
+        if action_type in {"click", "fill"}:
+            if not target or not target.isdigit():
+                return (
+                    None,
+                    f"{action_type} requires a numeric element ID from the current elements list.",
+                )
+            if available_element_ids and target not in available_element_ids:
+                return (
+                    None,
+                    f"Element {target} is not in the current elements list.",
+                )
+
+        if action_type == "fill" and not value:
+            return None, "fill requires a text value."
+
+        if action_type == "send_chat" and not value:
+            return None, "send_chat requires a message."
+
+        if action_type == "press" and not value:
+            return None, "press requires a key name."
+
+        if action_type == "navigate" and not url:
+            return None, "navigate requires a URL."
+
+        if action_type == "scroll":
+            direction = (value or "down").lower()
+            if direction not in {"up", "down"}:
+                return None, "scroll requires value 'up' or 'down'."
+            return (
+                BrowserAction(
+                    action_type=action_type,
+                    direction=direction,
+                ),
+                None,
+            )
+
+        return (
+            BrowserAction(
+                action_type=action_type,
+                target=target,
+                value=value,
+                url=url,
+            ),
+            None,
+        )
+
     def _detect_stuck_loop(self) -> bool:
         if len(self.action_history) < 3:
             return False
 
+        consecutive_waits: List[dict] = []
+        for entry in reversed(self.action_history):
+            if entry.get("action") != "wait" or not entry.get("success", False):
+                break
+            consecutive_waits.append(entry)
+        consecutive_waits.reverse()
+
+        if len(consecutive_waits) >= self._wait_stuck_min_consecutive_waits:
+            elapsed_seconds = (
+                consecutive_waits[-1]["timestamp"] - consecutive_waits[0]["timestamp"]
+            ).total_seconds()
+            had_progress = any(
+                entry.get("dom_changed") or entry.get("had_activity")
+                for entry in consecutive_waits
+            )
+            page_signatures = {
+                entry.get("page_signature", "")
+                for entry in consecutive_waits
+            }
+            if (
+                elapsed_seconds >= self._wait_stuck_threshold_seconds
+                and not had_progress
+                and len(page_signatures) == 1
+            ):
+                return True
+
         last = self.action_history[-3:]
-
-        # Waiting for content is normal — require 5 consecutive waits
-        # with no page change before calling it stuck
-        if all(a["action"] == "wait" for a in last):
-            if len(self.action_history) < 5:
-                return False
-            last5 = self.action_history[-5:]
-            if not all(a["action"] == "wait" for a in last5):
-                return False
-            texts = {a.get("visible_text", "")[:200] for a in last5}
-            return len(texts) == 1
-
         same_action = len({a["action"] for a in last}) == 1
         same_detail = len({a["detail"] for a in last}) == 1
-        same_text = len({a.get("visible_text", "")[:200] for a in last}) == 1
-        return same_action and same_detail and same_text
+        same_page = len({a.get("page_signature", "") for a in last}) == 1
+        no_progress = not any(
+            a.get("dom_changed") or a.get("had_activity")
+            for a in last
+        )
+        return same_action and same_detail and same_page and no_progress
+
+    def _observation_changed_meaningfully(
+        self,
+        before: Optional[BrowserObservation],
+        after: Optional[BrowserObservation],
+    ) -> bool:
+        if before is None or after is None:
+            return before is not after
+
+        return (
+            before.url != after.url
+            or before.title != after.title
+            or self._normalize_visible_text(before.visible_text)
+            != self._normalize_visible_text(after.visible_text)
+            or self._interactive_elements_signature(before)
+            != self._interactive_elements_signature(after)
+        )
+
+    def _observation_progress_signature(
+        self, observation: Optional[BrowserObservation]
+    ) -> str:
+        if observation is None:
+            return ""
+
+        return "|".join(
+            [
+                observation.url,
+                observation.title,
+                self._normalize_visible_text(observation.visible_text),
+                self._interactive_elements_signature(observation),
+            ]
+        )
+
+    def _interactive_elements_signature(
+        self, observation: Optional[BrowserObservation]
+    ) -> str:
+        if observation is None:
+            return ""
+
+        elements = [
+            f"{element.role}:{element.name[:60]}:{element.tag_name}:"
+            f"{(element.current_value or '')[:40]}"
+            for element in observation.interactive_elements[:12]
+        ]
+        return "|".join(elements)
+
+    def _normalize_visible_text(self, text: str) -> str:
+        return " ".join(text.split())[:500]
+
+    def _summarize_action_message(self, message: Optional[str]) -> str:
+        if not message:
+            return ""
+        return " ".join(message.split())[:220]
+
+    def _turn_had_activity(
+        self,
+        *,
+        network_start: int,
+        websocket_start: int,
+    ) -> bool:
+        return self._latest_turn_activity_timestamp(
+            network_start=network_start,
+            websocket_start=websocket_start,
+        ) is not None
+
+    def _latest_turn_activity_timestamp(
+        self,
+        *,
+        network_start: int,
+        websocket_start: int,
+    ) -> Optional[datetime]:
+        if not self.browser_diagnostics:
+            return None
+
+        timestamps = [
+            event.timestamp
+            for event in self.browser_diagnostics.network_events[network_start:]
+            if event.is_first_party
+        ]
+        timestamps.extend(
+            event.timestamp
+            for event in self.browser_diagnostics.websocket_events[websocket_start:]
+            if event.is_first_party
+        )
+        return max(timestamps) if timestamps else None
 
     def _action_to_message(self, action: BrowserAction) -> str:
         if action.action_type == "send_chat":
@@ -583,3 +947,376 @@ class BrowserScenarioRunner:
         if self.goal_evaluation_result:
             j += f"\nLast confidence: {self.goal_evaluation_result.confidence:.2f}"
         return j
+
+    def _attach_diagnostic_listeners(self) -> None:
+        page = self.browser_driver.get_page()
+        if not page:
+            return
+
+        page.on("response", self._record_response)
+        page.on("requestfailed", self._record_request_failed)
+        page.on("console", self._record_console)
+        page.on("pageerror", self._record_page_error)
+        page.on("websocket", self._record_websocket)
+
+    def _record_response(self, response: Any) -> None:
+        if not self.browser_diagnostics:
+            return
+        try:
+            self.browser_diagnostics.network_events.append(
+                BrowserNetworkEvent(
+                    event_type="response",
+                    url=response.url,
+                    method=response.request.method,
+                    resource_type=response.request.resource_type,
+                    status_code=response.status,
+                    is_first_party=self._is_first_party_url(response.url),
+                )
+            )
+        except Exception:
+            if self.debug:
+                print("⚠️  Failed to record browser response event")
+
+    def _record_request_failed(self, request: Any) -> None:
+        if not self.browser_diagnostics:
+            return
+        try:
+            failure = request.failure
+            failure_text = None
+            if isinstance(failure, dict):
+                failure_text = str(failure.get("errorText") or failure.get("error") or "")
+            elif failure:
+                failure_text = str(failure)
+
+            self.browser_diagnostics.network_events.append(
+                BrowserNetworkEvent(
+                    event_type="requestfailed",
+                    url=request.url,
+                    method=request.method,
+                    resource_type=request.resource_type,
+                    failure_text=failure_text,
+                    is_first_party=self._is_first_party_url(request.url),
+                )
+            )
+        except Exception:
+            if self.debug:
+                print("⚠️  Failed to record browser requestfailed event")
+
+    def _record_console(self, message: Any) -> None:
+        if not self.browser_diagnostics:
+            return
+        try:
+            location = message.location or {}
+            source_url = location.get("url")
+            self.browser_diagnostics.console_events.append(
+                BrowserConsoleEvent(
+                    level=message.type,
+                    text=message.text,
+                    source_url=source_url,
+                    line_number=location.get("lineNumber"),
+                    column_number=location.get("columnNumber"),
+                    is_first_party=self._is_first_party_url(source_url),
+                )
+            )
+        except Exception:
+            if self.debug:
+                print("⚠️  Failed to record browser console event")
+
+    def _record_page_error(self, error: Any) -> None:
+        if not self.browser_diagnostics:
+            return
+        try:
+            self.browser_diagnostics.page_errors.append(
+                BrowserPageErrorEvent(
+                    message=str(error),
+                    stack=getattr(error, "stack", None),
+                )
+            )
+        except Exception:
+            if self.debug:
+                print("⚠️  Failed to record browser pageerror event")
+
+    def _record_websocket(self, websocket: Any) -> None:
+        if not self.browser_diagnostics:
+            return
+
+        try:
+            url = getattr(websocket, "url", "") or ""
+            is_first_party = self._is_first_party_url(url)
+            self._append_websocket_event(
+                url=url,
+                event_type="open",
+                is_first_party=is_first_party,
+            )
+
+            websocket.on(
+                "framesent",
+                lambda payload: self._append_websocket_event(
+                    url=url,
+                    event_type="framesent",
+                    payload=payload,
+                    is_first_party=is_first_party,
+                ),
+            )
+            websocket.on(
+                "framereceived",
+                lambda payload: self._append_websocket_event(
+                    url=url,
+                    event_type="framereceived",
+                    payload=payload,
+                    is_first_party=is_first_party,
+                ),
+            )
+            websocket.on(
+                "close",
+                lambda *_: self._append_websocket_event(
+                    url=url,
+                    event_type="close",
+                    is_first_party=is_first_party,
+                ),
+            )
+        except Exception:
+            if self.debug:
+                print("⚠️  Failed to record browser websocket event")
+
+    def _append_websocket_event(
+        self,
+        *,
+        url: str,
+        event_type: str,
+        is_first_party: bool,
+        payload: Any = None,
+    ) -> None:
+        if not self.browser_diagnostics:
+            return
+
+        payload_preview, payload_size = self._summarize_websocket_payload(payload)
+        self.browser_diagnostics.websocket_events.append(
+            BrowserWebSocketEvent(
+                event_type=event_type,
+                url=url,
+                payload_preview=payload_preview,
+                payload_size=payload_size,
+                is_first_party=is_first_party,
+            )
+        )
+
+    def _summarize_websocket_payload(
+        self, payload: Any
+    ) -> tuple[Optional[str], Optional[int]]:
+        if payload is None:
+            return None, None
+
+        if isinstance(payload, bytes):
+            return payload[:120].decode("utf-8", errors="replace"), len(payload)
+
+        payload_text = str(payload)
+        return payload_text[:120], len(payload_text)
+
+    async def _capture_issue_relevant_screenshot(
+        self,
+        *,
+        turn_index: int,
+        action_result: BrowserActionResult,
+        network_start: int,
+        console_start: int,
+        page_error_start: int,
+    ) -> Optional[str]:
+        if not self.artifact_manager or not self.browser_driver:
+            return None
+
+        noteworthy_signal = (
+            not action_result.success
+            or self._turn_has_noteworthy_signal(
+                network_start=network_start,
+                console_start=console_start,
+                page_error_start=page_error_start,
+                observation=action_result.observation,
+            )
+        )
+        if not noteworthy_signal:
+            return None
+
+        return await self.artifact_manager.capture_screenshot(
+            self.browser_driver.get_page(),
+            name=f"issue_turn_{turn_index}",
+            force=True,
+        )
+
+    def _turn_has_noteworthy_signal(
+        self,
+        *,
+        network_start: int,
+        console_start: int,
+        page_error_start: int,
+        observation: Optional[BrowserObservation],
+    ) -> bool:
+        if not self.browser_diagnostics:
+            return False
+
+        for event in self.browser_diagnostics.network_events[network_start:]:
+            if event.is_first_party and (
+                (event.status_code is not None and event.status_code >= 400)
+                or event.event_type == "requestfailed"
+            ):
+                return True
+
+        for event in self.browser_diagnostics.console_events[console_start:]:
+            if event.is_first_party and event.level.lower() == "error":
+                return True
+
+        if self.browser_diagnostics.page_errors[page_error_start:]:
+            return True
+
+        return self._observation_has_error_state(observation)
+
+    def _observation_has_error_state(
+        self, observation: Optional[BrowserObservation]
+    ) -> bool:
+        if not observation:
+            return False
+
+        visible_text = observation.visible_text.lower()
+        error_markers = (
+            "something went wrong",
+            "unexpected error",
+            "internal server error",
+            "try again later",
+            "unauthorized",
+            "forbidden",
+            "error code",
+        )
+        return any(marker in visible_text for marker in error_markers)
+
+    async def _refresh_identity_context(self) -> None:
+        if not self.browser_driver or not self.browser_diagnostics:
+            return
+
+        page = self.browser_driver.get_page()
+        context = self.browser_driver.get_context()
+        if not page or not context:
+            return
+
+        current_identity = self.browser_diagnostics.identity
+        try:
+            storage_result = await page.evaluate(
+                """() => ({
+                    userId:
+                        window.localStorage.getItem('helix_authenticated_user_id') ||
+                        window.localStorage.getItem('user_id') ||
+                        window.localStorage.getItem('userId'),
+                    conversationId:
+                        window.localStorage.getItem('conversationId') ||
+                        window.localStorage.getItem('conversation_id')
+                })"""
+            )
+        except Exception:
+            storage_result = {}
+
+        user_id = self._normalize_identifier(storage_result.get("userId"))
+        conversation_id = self._normalize_identifier(storage_result.get("conversationId"))
+
+        if user_id or conversation_id:
+            self.browser_diagnostics.identity = BrowserIdentityContext(
+                user_id=user_id or current_identity.user_id,
+                conversation_id=conversation_id or current_identity.conversation_id,
+                extraction_source="local_storage",
+            )
+            return
+
+        try:
+            cookies = await context.cookies()
+        except Exception:
+            cookies = []
+
+        cookie_map = {
+            str(cookie.get("name")): self._normalize_identifier(cookie.get("value"))
+            for cookie in cookies
+            if cookie.get("name")
+        }
+        cookie_user_id = (
+            cookie_map.get("helix_authenticated_user_id")
+            or cookie_map.get("user_id")
+            or cookie_map.get("userId")
+        )
+        cookie_conversation_id = (
+            cookie_map.get("conversationId")
+            or cookie_map.get("conversation_id")
+        )
+        if cookie_user_id or cookie_conversation_id:
+            self.browser_diagnostics.identity = BrowserIdentityContext(
+                user_id=cookie_user_id or current_identity.user_id,
+                conversation_id=cookie_conversation_id or current_identity.conversation_id,
+                extraction_source="cookies",
+            )
+            return
+
+        auth_session_url = self._build_auth_session_url()
+        if not auth_session_url:
+            return
+
+        try:
+            response = await context.request.get(auth_session_url)
+            if response.status != 200:
+                return
+            payload = await response.json()
+            session_payload = payload.get("session") if isinstance(payload, dict) else {}
+            session_user_id = self._normalize_identifier(
+                (session_payload or {}).get("user_id")
+                or (session_payload or {}).get("id")
+                or (session_payload or {}).get("sub")
+            )
+            session_conversation_id = self._normalize_identifier(
+                payload.get("conversation_id") if isinstance(payload, dict) else None
+            )
+            if session_user_id or session_conversation_id:
+                self.browser_diagnostics.identity = BrowserIdentityContext(
+                    user_id=session_user_id or current_identity.user_id,
+                    conversation_id=session_conversation_id or current_identity.conversation_id,
+                    extraction_source="auth_session",
+                    auth_session_url=auth_session_url,
+                )
+        except Exception:
+            return
+
+    def _build_first_party_hosts(self) -> List[str]:
+        hosts: List[str] = []
+        parsed_start = urlparse(self.browser_config.start_url)
+        if parsed_start.hostname:
+            hosts.append(parsed_start.hostname.lower())
+
+        for allowed in self.browser_config.domain_allowlist:
+            cleaned = allowed.strip().lower()
+            if cleaned:
+                hosts.append(cleaned)
+        return hosts
+
+    def _is_first_party_url(self, url: Optional[str]) -> bool:
+        if not url:
+            return False
+
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return False
+
+        for candidate in self._first_party_hosts:
+            if candidate.startswith("*."):
+                suffix = candidate[1:]
+                if host.endswith(suffix):
+                    return True
+            elif host == candidate or host.endswith(f".{candidate}"):
+                return True
+        return False
+
+    def _build_auth_session_url(self) -> Optional[str]:
+        parsed = urlparse(self.browser_config.start_url)
+        if not parsed.scheme or not parsed.netloc:
+            return None
+        return f"{parsed.scheme}://{parsed.netloc}/auth/session"
+
+    def _normalize_identifier(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
