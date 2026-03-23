@@ -775,14 +775,26 @@ class ReplicantAgent(BaseModel):
         
         return True
     
-    def get_initial_message(self) -> str:
+    def get_initial_message(self) -> Optional[str]:
         """Get the initial message to start the conversation.
         
         Returns:
-            Initial message
+            Initial message if configured, otherwise None.
         """
         return self.config.initial_message
-    
+
+    async def generate_opening_message(self) -> str:
+        """Generate an opening message from goal and facts when no initial_message is configured."""
+        prompt = (
+            f"You are starting a new conversation to achieve this goal: {self.config.goal}\n"
+            f"Available facts: {json.dumps(self.config.facts, indent=2)}\n\n"
+            "Write a natural opening message as a user. Be concise and direct."
+        )
+        return await self.response_generator.generate_response(
+            api_message=prompt,
+            conversation_state=self.state,
+        )
+
     async def process_api_response(self, api_response: str, triggering_message: Optional[str] = None) -> str:
         """Process an API response and generate the next user message.
         

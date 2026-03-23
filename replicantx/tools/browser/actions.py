@@ -218,6 +218,14 @@ async def execute_action(
             success, message, new_observation = await _execute_send_chat(
                 page, action.value, action_timeout_seconds
             )
+        elif action.action_type == "compose_chat":
+            success, message, new_observation = await _execute_compose_chat(
+                page, action.value, action_timeout_seconds
+            )
+        elif action.action_type == "submit_chat":
+            success, message, new_observation = await _execute_submit_chat(
+                page, action_timeout_seconds
+            )
         elif action.action_type == "click":
             success, message, new_observation = await _execute_click(
                 page, action.target, observation, action_timeout_seconds
@@ -271,52 +279,115 @@ async def execute_action(
     )
 
 
-async def _execute_send_chat(
-    page: Page, message: str, timeout_seconds: int
-) -> tuple[bool, str, Optional[BrowserObservation]]:
-    """
-    Execute a send chat action.
-
-    Detects chat input using heuristics, types the message, and presses Enter.
-
-    Args:
-        page: Playwright page object
-        message: Message to send
-        timeout_seconds: Timeout for action
-
-    Returns:
-        Tuple of (success, message, new_observation)
-    """
+async def _find_chat_input(page: Page) -> Optional[str]:
+    """Detect the chat composer input using heuristics with a generic fallback."""
     from replicantx.tools.browser.observation import detect_chat_input
 
-    # Try to find chat input
-    chat_input_selector = await detect_chat_input(page)
+    selector = await detect_chat_input(page)
+    if selector:
+        return selector
 
-    if not chat_input_selector:
-        # Fallback: try to find any visible textarea or input
+    try:
+        textarea = await page.wait_for_selector(
+            "textarea, input[type='text']", timeout=5000
+        )
+        if textarea:
+            return "textarea, input[type='text']"
+    except Exception:
+        pass
+
+    return None
+
+
+_SEND_BUTTON_SELECTORS = [
+    "button[aria-label*='send' i]",
+    "button[aria-label*='Send' i]",
+    "button[data-testid*='send' i]",
+    "button[type='submit']",
+]
+
+
+async def _find_send_button(page: Page) -> Optional[Locator]:
+    """Find a visible send/submit button near the chat composer."""
+    for selector in _SEND_BUTTON_SELECTORS:
         try:
-            textarea = await page.wait_for_selector("textarea, input[type='text']", timeout=5000)
-            if textarea:
-                chat_input_selector = "textarea, input[type='text']"
+            buttons = await page.query_selector_all(selector)
+            for btn in buttons:
+                if await btn.is_visible():
+                    return btn  # type: ignore[return-value]
         except Exception:
-            pass
+            continue
+    return None
 
+
+async def _execute_compose_chat(
+    page: Page, message: str, timeout_seconds: int
+) -> tuple[bool, str, Optional[BrowserObservation]]:
+    """Type a message into the chat composer without submitting it.
+
+    This allows the caller to interact with autocomplete/mention dropdowns
+    before sending.
+    """
+    chat_input_selector = await _find_chat_input(page)
     if not chat_input_selector:
         return False, "Could not find chat input field", None
 
     try:
-        # Type the message
-        await page.fill(chat_input_selector, message, timeout=timeout_seconds * 1000)
+        await page.click(chat_input_selector, timeout=timeout_seconds * 1000)
+        await page.keyboard.type(message, delay=30)
+        await asyncio.sleep(0.3)
 
-        # Press Enter to send
+        new_observation = await extract_observation(page)
+        return True, f"Composed chat draft: {message}", new_observation
+    except Exception as e:
+        return False, _format_action_failure("compose chat", None, str(e)), None
+
+
+async def _execute_submit_chat(
+    page: Page, timeout_seconds: int
+) -> tuple[bool, str, Optional[BrowserObservation]]:
+    """Submit whatever is currently in the chat composer.
+
+    Prefers clicking a visible send button; falls back to pressing Enter on
+    the chat input.
+    """
+    send_btn = await _find_send_button(page)
+    if send_btn:
+        try:
+            await send_btn.click(timeout=timeout_seconds * 1000)
+            await _wait_for_page_settle(page, timeout_seconds)
+            new_observation = await extract_observation(page)
+            return True, "Submitted chat via send button", new_observation
+        except Exception:
+            pass
+
+    chat_input_selector = await _find_chat_input(page)
+    if not chat_input_selector:
+        return False, "Could not find chat input to submit", None
+
+    try:
         await page.press(chat_input_selector, "Enter")
+        await _wait_for_page_settle(page, timeout_seconds)
+        new_observation = await extract_observation(page)
+        return True, "Submitted chat via Enter key", new_observation
+    except Exception as e:
+        return False, _format_action_failure("submit chat", None, str(e)), None
 
-        # Wait for response (network idle or debounce)
+
+async def _execute_send_chat(
+    page: Page, message: str, timeout_seconds: int
+) -> tuple[bool, str, Optional[BrowserObservation]]:
+    """Compose and immediately submit a chat message (legacy one-step action)."""
+    chat_input_selector = await _find_chat_input(page)
+    if not chat_input_selector:
+        return False, "Could not find chat input field", None
+
+    try:
+        await page.fill(chat_input_selector, message, timeout=timeout_seconds * 1000)
+        await page.press(chat_input_selector, "Enter")
         await _wait_for_page_settle(page, timeout_seconds)
 
-        # Extract new observation
         new_observation = await extract_observation(page)
-
         return True, f"Sent chat message: {message}", new_observation
     except Exception as e:
         return False, _format_action_failure("send chat", None, str(e)), None

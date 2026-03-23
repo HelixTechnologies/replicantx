@@ -243,6 +243,77 @@ def test_normalize_planned_action_maps_scroll_value_to_direction() -> None:
     assert action.direction == "down"
 
 
+def test_detect_stuck_loop_catches_alternating_action_cycle() -> None:
+    """An A-B-A-B-A-B cycle (e.g. Choose rooms / Close) with no progress is stuck."""
+    runner = _make_runner()
+    start = datetime(2026, 3, 22, 10, 0, tzinfo=timezone.utc)
+    runner.action_history = []
+    for i in range(6):
+        if i % 2 == 0:
+            entry = {
+                "action": "click",
+                "detail": "element 22",
+                "message": "Clicked button: Choose rooms",
+                "success": True,
+                "timestamp": start + timedelta(seconds=i * 4),
+                "dom_changed": False,
+                "had_activity": False,
+                "page_signature": "same-page",
+                "visible_text": "same text",
+            }
+        else:
+            entry = {
+                "action": "click",
+                "detail": "element 77",
+                "message": "Clicked button: Close",
+                "success": True,
+                "timestamp": start + timedelta(seconds=i * 4),
+                "dom_changed": False,
+                "had_activity": False,
+                "page_signature": "same-page",
+                "visible_text": "same text",
+            }
+        runner.action_history.append(entry)
+
+    assert runner._detect_stuck_loop() is True
+
+
+def test_detect_stuck_loop_allows_alternating_cycle_with_progress() -> None:
+    """If any entry in an alternating cycle has dom_changed, it's not stuck."""
+    runner = _make_runner()
+    start = datetime(2026, 3, 22, 10, 0, tzinfo=timezone.utc)
+    runner.action_history = []
+    for i in range(6):
+        entry = {
+            "action": "click",
+            "detail": f"element {22 if i % 2 == 0 else 77}",
+            "message": "Clicked",
+            "success": True,
+            "timestamp": start + timedelta(seconds=i * 4),
+            "dom_changed": (i == 3),
+            "had_activity": False,
+            "page_signature": "same-page",
+            "visible_text": "same text",
+        }
+        runner.action_history.append(entry)
+
+    assert runner._detect_stuck_loop() is False
+
+
+def test_recovery_guidance_fires_for_repetitive_successful_actions() -> None:
+    """Recovery guidance should warn about cycling even when actions succeed."""
+    runner = _make_runner()
+    runner.action_history = [
+        {"action": "click", "detail": "element 22", "success": True},
+        {"action": "click", "detail": "element 77", "success": True},
+        {"action": "click", "detail": "element 22", "success": True},
+        {"action": "click", "detail": "element 77", "success": True},
+    ]
+
+    guidance = runner._build_planner_recovery_guidance()
+    assert any("repeating the same actions" in hint.lower() for hint in guidance)
+
+
 def test_build_planner_recovery_guidance_flags_stale_dom_and_overlay_failures() -> None:
     runner = _make_runner()
     runner.action_history = [

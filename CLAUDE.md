@@ -209,7 +209,7 @@ Three evaluation modes for detecting conversation completion:
 
 **Components in `tools/browser/`:**
 - **observation.py**: Page observation with smart element ranking
-- **actions.py**: Browser action execution (send_chat, click, fill, press, wait, scroll, navigate)
+- **actions.py**: Browser action execution (send_chat, compose_chat, submit_chat, click, fill, press, wait, scroll, navigate)
 - **artifacts.py**: Trace and screenshot management
 - **playwright_manager.py**: Playwright driver with lifecycle management
 

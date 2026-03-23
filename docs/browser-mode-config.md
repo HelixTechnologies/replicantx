@@ -35,7 +35,7 @@ replicant:
     destination: "Paris"
   system_prompt: |
     You are a user trying to accomplish your goal.
-  initial_message: "Hi, I'd like to book a flight."
+  initial_message: "Hi, I'd like to book a flight."  # optional — planner derives from goal/facts if omitted
   max_turns: 20
   completion_keywords:
     - "booked"

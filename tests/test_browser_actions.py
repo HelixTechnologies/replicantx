@@ -7,7 +7,10 @@ from replicantx.models import BrowserAction, BrowserObservation, InteractiveElem
 from replicantx.tools.browser.actions import (
     _choice_values_match,
     _execute_click,
+    _execute_compose_chat,
     _execute_fill,
+    _execute_send_chat,
+    _execute_submit_chat,
     _format_action_failure,
     _looks_like_phone_value,
     _parse_element_index,
@@ -300,3 +303,150 @@ def test_format_action_failure_normalizes_overlay_and_stale_dom_messages() -> No
         "3",
         "Element is not attached to the DOM",
     )
+
+
+# ---------------------------------------------------------------------------
+# Staged chat action tests
+# ---------------------------------------------------------------------------
+
+_CHAT_HTML = """
+<div id="chat-app">
+  <div id="messages"></div>
+  <textarea id="chat-input" placeholder="Type a message..."></textarea>
+  <button id="send-btn" type="button" aria-label="Send message">Send</button>
+</div>
+<ul id="mention-dropdown" role="listbox" hidden>
+  <li role="option" data-value="alice">Alice (alice@example.com)</li>
+  <li role="option" data-value="bob">Bob (bob@example.com)</li>
+</ul>
+<script>
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('send-btn');
+  const dropdown = document.getElementById('mention-dropdown');
+  const messages = document.getElementById('messages');
+
+  input.addEventListener('input', () => {
+    if (input.value.includes('@')) {
+      dropdown.hidden = false;
+    } else {
+      dropdown.hidden = true;
+    }
+  });
+
+  for (const opt of dropdown.querySelectorAll('[role="option"]')) {
+    opt.addEventListener('click', () => {
+      const name = opt.textContent.split('(')[0].trim();
+      input.value = input.value.replace(/@\\S*$/, '@' + name + ' ');
+      dropdown.hidden = true;
+    });
+  }
+
+  function submitMessage() {
+    if (!input.value.trim()) return;
+    const msg = document.createElement('div');
+    msg.textContent = input.value;
+    msg.className = 'sent';
+    messages.appendChild(msg);
+    input.value = '';
+  }
+
+  sendBtn.addEventListener('click', submitMessage);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitMessage();
+    }
+  });
+</script>
+"""
+
+
+@pytest.mark.asyncio
+async def test_compose_chat_types_without_submitting() -> None:
+    """compose_chat should put text in the composer but NOT send it."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content(_CHAT_HTML)
+
+        success, message, obs = await _execute_compose_chat(
+            page, "Hello @", timeout_seconds=5
+        )
+
+        assert success is True, message
+        assert "Composed" in message
+        value = await page.input_value("#chat-input")
+        assert "@" in value
+        sent_msgs = await page.query_selector_all("#messages .sent")
+        assert len(sent_msgs) == 0, "Message should NOT have been sent yet"
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_submit_chat_sends_existing_draft_via_button() -> None:
+    """submit_chat should send whatever is already in the composer."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content(_CHAT_HTML)
+
+        await page.fill("#chat-input", "Pre-filled draft")
+
+        success, message, obs = await _execute_submit_chat(page, timeout_seconds=5)
+
+        assert success is True, message
+        sent_msgs = await page.query_selector_all("#messages .sent")
+        assert len(sent_msgs) == 1
+        text = await sent_msgs[0].inner_text()
+        assert "Pre-filled draft" in text
+        assert await page.input_value("#chat-input") == ""
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_send_chat_still_works_as_one_step() -> None:
+    """Legacy send_chat should compose and submit in a single call."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content(_CHAT_HTML)
+
+        success, message, obs = await _execute_send_chat(
+            page, "One-step message", timeout_seconds=5
+        )
+
+        assert success is True, message
+        sent_msgs = await page.query_selector_all("#messages .sent")
+        assert len(sent_msgs) == 1
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_execute_action_routes_compose_and_submit_chat() -> None:
+    """execute_action dispatcher should handle compose_chat and submit_chat."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content(_CHAT_HTML)
+
+        compose_result = await execute_action(
+            page,
+            action=BrowserAction(action_type="compose_chat", value="Draft @alice"),
+            action_timeout_seconds=5,
+        )
+        assert compose_result.success is True
+
+        submit_result = await execute_action(
+            page,
+            action=BrowserAction(action_type="submit_chat"),
+            action_timeout_seconds=5,
+        )
+        assert submit_result.success is True
+
+        sent_msgs = await page.query_selector_all("#messages .sent")
+        assert len(sent_msgs) == 1
+
+        await browser.close()

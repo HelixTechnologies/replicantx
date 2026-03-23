@@ -180,7 +180,9 @@ This supports the “element index/id” pattern so the model can click without 
 
 A PydanticAI Agent with tools like:
 
-* `send_chat(text)`
+* `send_chat(text)` — compose and submit in one step
+* `compose_chat(text)` — type into the chat composer without submitting (for @mentions, autocomplete)
+* `submit_chat()` — submit the current draft (prefers send button, falls back to Enter)
 * `click(element_id)`
 * `fill(element_id, text)`
 * `press(key)`
@@ -425,7 +427,7 @@ replicant:
     You are a user of Helix trying to accomplish the goal.
     Prefer using chat, but click suggested buttons/cards when they help.
     If stuck, try a different approach.
-  initial_message: "Hi — I need to book a flight from London to Paris next week."
+  initial_message: "Hi — I need to book a flight from London to Paris next week."  # optional
   max_turns: 20
   goal_evaluation_mode: hybrid
   browser:

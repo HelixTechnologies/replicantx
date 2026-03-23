@@ -232,9 +232,9 @@ class BrowserAction(BaseModel):
     """An action to perform in the browser."""
     model_config = ConfigDict(extra="forbid")
 
-    action_type: str = Field(..., description="Type of action: send_chat, click, fill, press, wait, scroll, navigate")
+    action_type: str = Field(..., description="Type of action: send_chat, compose_chat, submit_chat, click, fill, press, wait, scroll, navigate")
     target: Optional[str] = Field(None, description="Target element ID (for click, fill)")
-    value: Optional[str] = Field(None, description="Value to set (for fill, send_chat)")
+    value: Optional[str] = Field(None, description="Value to set (for fill, send_chat, compose_chat)")
     direction: Optional[str] = Field(None, description="Direction for scroll: up or down")
     amount: Optional[int] = Field(None, description="Amount to scroll in pixels")
     duration_ms: Optional[int] = Field(None, description="Wait duration in milliseconds")
@@ -540,7 +540,7 @@ class StepResult(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now, description="When step was executed")
 
     # Browser mode specific fields (optional)
-    action_type: Optional[str] = Field(None, description="Action type in browser mode (e.g., click, send_chat)")
+    action_type: Optional[str] = Field(None, description="Action type in browser mode (e.g., click, send_chat, compose_chat, submit_chat)")
     action_summary: Optional[str] = Field(None, description="Summary of browser action performed")
     planner_reasoning: Optional[str] = Field(None, description="Planner reasoning for the chosen browser action")
     page_url: Optional[str] = Field(None, description="Current page URL in browser mode")
@@ -627,7 +627,7 @@ class ReplicantConfig(BaseModel):
         "You are a helpful user trying to achieve a goal. You have access to certain facts but may not remember to provide all details upfront. Answer questions based on your available facts.",
         description="System prompt for the Replicant agent"
     )
-    initial_message: str = Field(..., description="Initial message to start the conversation")
+    initial_message: Optional[str] = Field(None, description="Optional initial message to start the conversation. In browser mode this is a suggested first draft the planner may compose.")
     max_turns: int = Field(20, description="Maximum conversation turns")
     completion_keywords: List[str] = Field(
         default_factory=lambda: ["complete", "finished", "done", "confirmed", "thank you", "success"],

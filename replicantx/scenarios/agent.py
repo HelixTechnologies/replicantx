@@ -196,8 +196,10 @@ class AgentScenarioRunner:
             self._watch_log("")
         
         try:
-            # Start conversation with initial message
+            # Start conversation with initial message (or generate one from goal/facts)
             current_message = self.replicant_agent.get_initial_message()
+            if current_message is None:
+                current_message = await self.replicant_agent.generate_opening_message()
             step_index = 0
             
             self._debug_log("Starting conversation", {

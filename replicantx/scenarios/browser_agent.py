@@ -55,7 +55,7 @@ class PlannedAction(BaseModel):
     action_type: str = Field(
         ...,
         description=(
-            "One of: click, fill, send_chat, press, wait, scroll, navigate"
+            "One of: click, fill, send_chat, compose_chat, submit_chat, press, wait, scroll, navigate"
         ),
     )
     target: Optional[str] = Field(
@@ -64,7 +64,7 @@ class PlannedAction(BaseModel):
     )
     value: Optional[str] = Field(
         None,
-        description="Text value for fill, send_chat, or the key name for press",
+        description="Text value for fill, send_chat, compose_chat, or the key name for press",
     )
     url: Optional[str] = Field(
         None, description="URL for navigate action only"
@@ -192,7 +192,7 @@ class BrowserScenarioRunner:
                         print(f"⚠️  {error}")
                     break
 
-                if action.action_type == "send_chat":
+                if action.action_type in ("send_chat", "submit_chat"):
                     initial_message_sent = True
 
                 # Execute the action
@@ -400,6 +400,10 @@ class BrowserScenarioRunner:
             "  click   — click an element (set target to the element ID number)",
             "  fill    — clear a field and type text (set target to element ID, value to the text)",
             "  send_chat — type a message in the chat input and press Enter (set value to the message)",
+            "  compose_chat — type a message in the chat input WITHOUT submitting (set value to the text).",
+            "    Use this when you need to trigger a dropdown, @mention, or autocomplete before sending.",
+            "    After compose_chat, interact with the dropdown (click an option) then use submit_chat.",
+            "  submit_chat — submit the current chat draft (no value needed). Prefers a visible send button, falls back to Enter.",
             "  press   — press a keyboard key (set value to the key, e.g. 'Enter', 'Escape', 'Tab')",
             "  wait    — wait for the page to update (no parameters needed)",
             "  scroll  — scroll the page (set value to 'up' or 'down')",
@@ -408,7 +412,10 @@ class BrowserScenarioRunner:
             "Important rules:",
             "- Look at the SCREENSHOT to understand what the page shows.",
             "- If you see a form (login, onboarding, profile, etc.), fill it out step by step.",
-            "- If the page has a chat interface and you're ready to chat, use send_chat.",
+            "- If the page has a chat interface and you're ready to chat, use send_chat for simple messages.",
+            "- STAGED CHAT: If your message includes @mentions, slash commands, or triggers an autocomplete/dropdown,",
+            "  use compose_chat first to type the text (which will open the dropdown), then click the correct",
+            "  dropdown option, and finally use submit_chat to send.",
             "- Don't repeat the same failing action — try something different.",
             "- For fill actions, use the element ID from the elements list.",
             "- For click actions, use the element ID from the elements list.",
@@ -501,6 +508,21 @@ class BrowserScenarioRunner:
 
     def _build_planner_recovery_guidance(self) -> List[str]:
         guidance: List[str] = []
+
+        # Detect repetitive cycling even when actions "succeed"
+        if len(self.action_history) >= 4:
+            recent = self.action_history[-4:]
+            action_detail_pairs = [(a["action"], a["detail"]) for a in recent]
+            unique_pairs = set(action_detail_pairs)
+            if len(unique_pairs) <= 2 and len(recent) >= 4:
+                guidance.append(
+                    "CRITICAL: You are repeating the same actions in a loop. "
+                    "Stop and try a fundamentally different approach. "
+                    "If a modal or panel opens, interact with the elements INSIDE it "
+                    "(e.g. View Rates, select a room, fill a form) instead of immediately closing it. "
+                    "If clicking a button keeps leading nowhere, try using chat or a different UI path."
+                )
+
         recent_failures = [
             entry for entry in self.action_history[-4:]
             if not entry.get("success", True)
@@ -559,6 +581,10 @@ class BrowserScenarioRunner:
         if self.watch:
             if action.action_type == "send_chat":
                 print(f"💬 Chat: {action.value}")
+            elif action.action_type == "compose_chat":
+                print(f"📝 Compose: {action.value}")
+            elif action.action_type == "submit_chat":
+                print(f"📤 Submit chat")
             elif action.action_type == "click":
                 print(f"🖱️  Click: element {action.target}")
             elif action.action_type == "fill":
@@ -739,11 +765,13 @@ class BrowserScenarioRunner:
         action_type = planned.action_type.strip().lower()
         allowed_action_types = {
             "click",
+            "compose_chat",
             "fill",
             "navigate",
             "press",
             "scroll",
             "send_chat",
+            "submit_chat",
             "wait",
         }
         if action_type not in allowed_action_types:
@@ -774,6 +802,9 @@ class BrowserScenarioRunner:
 
         if action_type == "send_chat" and not value:
             return None, "send_chat requires a message."
+
+        if action_type == "compose_chat" and not value:
+            return None, "compose_chat requires a message."
 
         if action_type == "press" and not value:
             return None, "press requires a key name."
@@ -833,6 +864,7 @@ class BrowserScenarioRunner:
             ):
                 return True
 
+        # Identical action repeated 3 times with no progress
         last = self.action_history[-3:]
         same_action = len({a["action"] for a in last}) == 1
         same_detail = len({a["detail"] for a in last}) == 1
@@ -841,7 +873,25 @@ class BrowserScenarioRunner:
             a.get("dom_changed") or a.get("had_activity")
             for a in last
         )
-        return same_action and same_detail and same_page and no_progress
+        if same_action and same_detail and same_page and no_progress:
+            return True
+
+        # Alternating-action cycle (A-B-A-B-A-B) with no net progress
+        if len(self.action_history) >= 6:
+            tail = self.action_history[-6:]
+            action_detail_pairs = [
+                (a["action"], a["detail"]) for a in tail
+            ]
+            even_slots = {action_detail_pairs[i] for i in range(0, 6, 2)}
+            odd_slots = {action_detail_pairs[i] for i in range(1, 6, 2)}
+            is_alternating = len(even_slots) == 1 and len(odd_slots) == 1 and even_slots != odd_slots
+            if is_alternating and not any(
+                a.get("dom_changed") or a.get("had_activity")
+                for a in tail
+            ):
+                return True
+
+        return False
 
     def _observation_changed_meaningfully(
         self,
@@ -931,6 +981,10 @@ class BrowserScenarioRunner:
     def _action_to_message(self, action: BrowserAction) -> str:
         if action.action_type == "send_chat":
             return action.value or ""
+        elif action.action_type == "compose_chat":
+            return f"Compose draft: {action.value or ''}"
+        elif action.action_type == "submit_chat":
+            return "Submit chat"
         elif action.action_type == "click":
             return f"Click element {action.target or '?'}"
         elif action.action_type == "fill":
