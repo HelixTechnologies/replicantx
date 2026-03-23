@@ -86,12 +86,14 @@ class BrowserScenarioRunner:
         debug: bool = False,
         watch: bool = False,
         verbose: bool = False,
+        llm_debug: bool = False,
     ):
         self.config = config
         self.auth_provider = auth_provider
         self.debug = debug
         self.watch = watch
         self.verbose = verbose
+        self.llm_debug = llm_debug
 
         if config.level != "agent":
             raise ValueError("BrowserScenarioRunner only supports agent-level scenarios")
@@ -181,6 +183,7 @@ class BrowserScenarioRunner:
                     print(f"{'─' * 50}")
 
                 # Plan next action using LLM with screenshot + DOM
+                self._llm_debug_turn = turn + 1
                 action = await self._plan_next_action(initial_message_sent)
 
                 if not action:
@@ -316,6 +319,23 @@ class BrowserScenarioRunner:
                 user_text = self._build_planner_user_message(
                     planner_feedback=planner_feedback,
                 )
+
+                if self.llm_debug:
+                    sep = "=" * 80
+                    print(f"\n{sep}")
+                    print(f"🔬 LLM DEBUG — BROWSER PLANNER  (turn={getattr(self, '_llm_debug_turn', '?')}, attempt={_attempt + 1})")
+                    print(sep)
+                    print(f"Model       : {model_name}")
+                    print(f"Elements    : {len(self.current_observation.interactive_elements)}")
+                    print(f"URL         : {self.current_observation.url}")
+                    print()
+                    print("── SYSTEM PROMPT ──")
+                    print(system_prompt)
+                    print()
+                    print("── USER MESSAGE ──")
+                    print(user_text)
+                    print(f"{sep}\n")
+
                 result = await agent.run(
                     [
                         user_text,
@@ -666,7 +686,7 @@ class BrowserScenarioRunner:
         from replicantx.scenarios.replicant import GoalEvaluator
         from replicantx.models import GoalEvidenceMode
 
-        evaluator = GoalEvaluator.create(self.replicant_config, verbose=self.verbose)
+        evaluator = GoalEvaluator.create(self.replicant_config, verbose=self.verbose, llm_debug=self.llm_debug)
 
         conversation_text = "\n".join(
             [

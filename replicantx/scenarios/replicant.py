@@ -42,9 +42,10 @@ class GoalEvaluator(BaseModel):
     custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
     completion_keywords: List[str] = Field(..., description="Keywords for keyword-based evaluation")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
-    
+    llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
+
     @classmethod
-    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "GoalEvaluator":
+    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "GoalEvaluator":
         """Create a GoalEvaluator from ReplicantConfig.
 
         Args:
@@ -66,7 +67,8 @@ class GoalEvaluator(BaseModel):
             screenshot_model_name=screenshot_model_name,
             custom_prompt=config.goal_evaluation_prompt,
             completion_keywords=config.completion_keywords,
-            verbose=verbose
+            verbose=verbose,
+            llm_debug=llm_debug,
         )
     
     async def evaluate_goal_completion(
@@ -241,16 +243,19 @@ class GoalEvaluator(BaseModel):
                 model_settings={"max_tokens": 1000}  # Only include max_tokens, skip temperature for compatibility
             )
 
-            # Verbose logging of the goal evaluation prompt
-            if self.verbose:
-                print("\n" + "="*80)
-                print("🔍 VERBOSE: GOAL EVALUATION PROMPT SENT TO PYDANTICAI")
-                print("="*80)
+            # Verbose/LLM-debug logging of the goal evaluation prompt
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                print(f"\n{sep}")
+                print(f"{label}: GOAL EVALUATION PROMPT SENT TO PYDANTICAI")
+                print(sep)
                 print(f"Model: {self.model_name}")
-                print(f"Model Settings: {{'max_tokens': 200}}")
                 print(f"Instructions: You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.")
-                print(f"Prompt: {prompt}")
-                print("="*80 + "\n")
+                print()
+                print("── PROMPT ──")
+                print(prompt)
+                print(f"{sep}\n")
 
             # Get evaluation
             result = await agent.run(prompt)
@@ -363,17 +368,21 @@ class GoalEvaluator(BaseModel):
                 model_settings={"max_tokens": 1000}
             )
 
-            # Verbose logging
-            if self.verbose:
-                print("\n" + "="*80)
-                print("🔍 VERBOSE: GOAL EVALUATION WITH SCREENSHOT")
-                print("="*80)
+            # Verbose/LLM-debug logging
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                print(f"\n{sep}")
+                print(f"{label}: GOAL EVALUATION WITH SCREENSHOT")
+                print(sep)
                 print(f"Model: {model_to_use}")
                 if self.screenshot_model_name:
                     print(f"Using dedicated screenshot evaluation model")
                 print(f"Screenshot: {screenshot_path}")
-                print(f"Prompt: {prompt}")
-                print("="*80 + "\n")
+                print()
+                print("── PROMPT ──")
+                print(prompt)
+                print(f"{sep}\n")
 
             # Run multimodal evaluation with image
             result = await agent.run(
@@ -589,6 +598,7 @@ class ResponseGenerator(BaseModel):
     model_settings: Dict[str, Any] = Field(default_factory=dict, description="Model settings")
     facts: Dict[str, Any] = Field(..., description="Available facts")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
+    llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
     
     def _create_agent(self) -> PydanticAgent:
         """Create a PydanticAI agent instance."""
@@ -637,16 +647,23 @@ class ResponseGenerator(BaseModel):
             # Create and use PydanticAI agent
             agent = self._create_agent()
             
-            # Verbose logging of the complete system prompt
-            if self.verbose:
-                print("\n" + "="*80)
-                print("🔍 VERBOSE: COMPLETE SYSTEM PROMPT SENT TO PYDANTICAI")
-                print("="*80)
-                print(f"Model: {self.model_name}")
+            # Verbose/LLM-debug logging of the complete system prompt
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                turn_num = conversation_state.turn_count + 1
+                print(f"\n{sep}")
+                print(f"{label}: REPLICANT RESPONSE GENERATION  (turn={turn_num})")
+                print(sep)
+                print(f"Model         : {self.model_name}")
                 print(f"Model Settings: {self.model_settings}")
-                print(f"System Prompt: {self.system_prompt}")
-                print(f"Context: {context}")
-                print("="*80 + "\n")
+                print()
+                print("── SYSTEM PROMPT ──")
+                print(self.system_prompt)
+                print()
+                print("── USER CONTEXT ──")
+                print(context)
+                print(f"{sep}\n")
             
             result = await agent.run(context)
             
@@ -692,12 +709,13 @@ class ReplicantAgent(BaseModel):
     goal_evaluator: GoalEvaluator = Field(..., description="Goal evaluation utility")
     
     @classmethod
-    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "ReplicantAgent":
+    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "ReplicantAgent":
         """Create a new Replicant agent.
         
         Args:
             config: Replicant configuration
             verbose: Enable verbose output for system prompts
+            llm_debug: Print complete LLM prompts on every call
             
         Returns:
             Configured Replicant agent
@@ -714,10 +732,11 @@ class ReplicantAgent(BaseModel):
             system_prompt=config.system_prompt,
             model_settings=model_settings,
             facts=config.facts,
-            verbose=verbose
+            verbose=verbose,
+            llm_debug=llm_debug,
         )
         
-        goal_evaluator = GoalEvaluator.create(config, verbose=verbose)
+        goal_evaluator = GoalEvaluator.create(config, verbose=verbose, llm_debug=llm_debug)
         
         return cls(
             config=config,

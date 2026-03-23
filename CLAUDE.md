@@ -79,6 +79,9 @@ replicantx run tests/*.yaml --ci
 # Run with debug output
 replicantx run tests/*.yaml --debug
 
+# Run with LLM debug: prints full system prompt + user message for every LLM call
+replicantx run tests/*.yaml --llm-debug
+
 # Run with watch mode (real-time monitoring)
 replicantx run tests/*.yaml --watch
 

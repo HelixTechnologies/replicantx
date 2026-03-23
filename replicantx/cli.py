@@ -86,6 +86,9 @@ def run(
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug mode: Shows detailed technical information including HTTP client setup, request payloads, response validation, AI processing, and assertion results. Perfect for troubleshooting failed tests and performance analysis."
     ),
+    llm_debug: bool = typer.Option(
+        False, "--llm-debug", help="Enable LLM debug mode: Prints the complete system prompt and user message sent to the LLM on every turn (both API agent and browser planner). Use this to inspect exactly what instructions and context are supplied to the model each step."
+    ),
     watch: bool = typer.Option(
         False, "--watch", help="Enable watch mode: Real-time conversation monitoring with live timestamps, user/assistant messages, step results, and final summaries. Perfect for demos, monitoring long tests, and validating conversation flow."
     ),
@@ -131,6 +134,7 @@ def run(
 
 MONITORING & DEBUGGING:
   --debug: Technical deep-dive with HTTP requests, AI model details, and validation results
+  --llm-debug: Prints complete system prompt + user message for every LLM call each turn
   --watch: Real-time conversation monitoring with timestamps and live updates  
   --debug --watch: Combined mode for comprehensive analysis during development
 
@@ -175,6 +179,7 @@ EXAMPLES:
         ci_mode=ci,
         verbose=verbose,
         debug=debug,
+        llm_debug=llm_debug,
         watch=watch,
         timeout_override=timeout,
         max_retries_override=max_retries,
@@ -194,6 +199,7 @@ async def run_scenarios_async(
     ci_mode: bool = False,
     verbose: bool = False,
     debug: bool = False,
+    llm_debug: bool = False,
     watch: bool = False,
     timeout_override: Optional[int] = None,
     max_retries_override: Optional[int] = None,
@@ -261,6 +267,7 @@ async def run_scenarios_async(
                 ci_mode=ci_mode,
                 verbose=verbose,
                 debug=debug,
+                llm_debug=llm_debug,
                 watch=watch,
                 max_concurrent=max_concurrent,
             )
@@ -273,6 +280,7 @@ async def run_scenarios_async(
                 ci_mode=ci_mode,
                 verbose=verbose,
                 debug=debug,
+                llm_debug=llm_debug,
                 watch=watch,
             )
     
@@ -313,7 +321,8 @@ async def run_scenarios_sequential(
     ci_mode: bool,
     verbose: bool,
     debug: bool,
-    watch: bool,
+    llm_debug: bool = False,
+    watch: bool = False,
 ):
     """Run scenarios sequentially."""
     for file_path, config in scenarios:
@@ -329,9 +338,9 @@ async def run_scenarios_sequential(
                     # Import auth providers
                     from .auth import create_auth_provider
                     auth_provider = create_auth_provider(config.auth)
-                    runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose)
+                    runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
                 else:
-                    runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+                    runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
             else:
                 raise ValueError(f"Unsupported test level: {config.level}")
 
@@ -372,7 +381,8 @@ async def run_scenarios_parallel(
     ci_mode: bool,
     verbose: bool,
     debug: bool,
-    watch: bool,
+    llm_debug: bool = False,
+    watch: bool = False,
     max_concurrent: Optional[int] = None,
 ):
     """Run scenarios in parallel."""
@@ -392,9 +402,9 @@ async def run_scenarios_parallel(
             # Apply semaphore if concurrency is limited
             if semaphore:
                 async with semaphore:
-                    return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+                    return await _execute_scenario(file_path, config, task_id, debug, watch, verbose, llm_debug)
             else:
-                return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+                return await _execute_scenario(file_path, config, task_id, debug, watch, verbose, llm_debug)
                 
         except Exception as e:
             console.print(f"❌ Error running {file_path}: {e}")
@@ -460,6 +470,7 @@ async def _execute_scenario(
     debug: bool,
     watch: bool,
     verbose: bool,
+    llm_debug: bool = False,
 ):
     """Execute a single scenario and return the result."""
     # Create appropriate runner based on level and interaction mode
@@ -471,9 +482,9 @@ async def _execute_scenario(
             # Import auth providers
             from .auth import create_auth_provider
             auth_provider = create_auth_provider(config.auth)
-            runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose)
+            runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
         else:
-            runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+            runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
     else:
         raise ValueError(f"Unsupported test level: {config.level}")
 
