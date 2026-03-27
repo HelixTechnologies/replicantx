@@ -27,7 +27,7 @@ from rich.console import Console
 class AgentScenarioRunner:
     """Runner for Replicant agent-driven (Level 2) test scenarios."""
     
-    def __init__(self, config: ScenarioConfig, debug: bool = False, watch: bool = False, verbose: bool = False):
+    def __init__(self, config: ScenarioConfig, debug: bool = False, watch: bool = False, verbose: bool = False, llm_debug: bool = False):
         """Initialize the agent scenario runner.
         
         Args:
@@ -35,12 +35,14 @@ class AgentScenarioRunner:
             debug: Enable debug mode with technical details
             watch: Enable watch mode for real-time monitoring
             verbose: Enable verbose output for system prompts
+            llm_debug: Print the complete system prompt and user message for every LLM call
         """
         self.config = config
         self.debug = debug
         self.watch = watch
         self.verbose = verbose
-        self.console = Console() if (debug or watch or verbose) else None
+        self.llm_debug = llm_debug
+        self.console = Console() if (debug or watch or verbose or llm_debug) else None
         self.auth_provider = self._create_auth_provider()
         self.http_client: Optional[HTTPClient] = None
         self.replicant_agent: Optional[ReplicantAgent] = None
@@ -149,7 +151,7 @@ class AgentScenarioRunner:
         })
         
         # Initialize Replicant agent
-        self.replicant_agent = ReplicantAgent.create(self.config.replicant, verbose=self.verbose)
+        self.replicant_agent = ReplicantAgent.create(self.config.replicant, verbose=self.verbose, llm_debug=self.llm_debug)
         
         current_datetime = datetime.now()
         date_str = current_datetime.strftime("%A, %B %d, %Y")
@@ -194,8 +196,10 @@ class AgentScenarioRunner:
             self._watch_log("")
         
         try:
-            # Start conversation with initial message
+            # Start conversation with initial message (or generate one from goal/facts)
             current_message = self.replicant_agent.get_initial_message()
+            if current_message is None:
+                current_message = await self.replicant_agent.generate_opening_message()
             step_index = 0
             
             self._debug_log("Starting conversation", {

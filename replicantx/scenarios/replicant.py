@@ -15,8 +15,9 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.models import infer_model
+from pydantic_ai.messages import ImageUrl
 
-from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode
+from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode, BrowserObservation, GoalEvidenceMode
 from ..tools.http_client import HTTPResponse
 
 
@@ -34,90 +35,175 @@ class ConversationState(BaseModel):
 class GoalEvaluator(BaseModel):
     """Evaluates whether conversation goals have been achieved using different strategies."""
     model_config = {"extra": "forbid"}
-    
+
     mode: GoalEvaluationMode = Field(..., description="Evaluation mode")
     model_name: Optional[str] = Field(None, description="Model for intelligent evaluation")
+    screenshot_model_name: Optional[str] = Field(None, description="Model for screenshot-based evaluation (vision-capable)")
     custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
     completion_keywords: List[str] = Field(..., description="Keywords for keyword-based evaluation")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
-    
+    llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
+
     @classmethod
-    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "GoalEvaluator":
+    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "GoalEvaluator":
         """Create a GoalEvaluator from ReplicantConfig.
-        
+
         Args:
             config: Replicant configuration
-            
+
         Returns:
             Configured GoalEvaluator
         """
         model_name = config.goal_evaluation_model or config.llm.model
-        
+
+        # Get screenshot evaluation model from browser config if available
+        screenshot_model_name = None
+        if config.browser and config.browser.screenshot_evaluation_model:
+            screenshot_model_name = config.browser.screenshot_evaluation_model
+
         return cls(
             mode=config.goal_evaluation_mode,
             model_name=model_name,
+            screenshot_model_name=screenshot_model_name,
             custom_prompt=config.goal_evaluation_prompt,
             completion_keywords=config.completion_keywords,
-            verbose=verbose
+            verbose=verbose,
+            llm_debug=llm_debug,
         )
     
     async def evaluate_goal_completion(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,  # Changed from conversation_history for flexibility
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
+        screenshot_path: Optional[str] = None,
+        goal_evidence_mode: GoalEvidenceMode = GoalEvidenceMode.DOM,
     ) -> GoalEvaluationResult:
         """Evaluate whether the conversation goal has been achieved.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text (or messages)
             facts: Available facts for context
-            
+            current_observation: Optional browser observation for browser mode
+            screenshot_path: Optional path to screenshot for visual evaluation
+            goal_evidence_mode: Evidence mode (dom, screenshot, dom_then_screenshot, both)
+
         Returns:
             Goal evaluation result
         """
-        if self.mode == GoalEvaluationMode.KEYWORDS:
-            return self._evaluate_with_keywords(goal, conversation_history)
-        elif self.mode == GoalEvaluationMode.INTELLIGENT:
-            return await self._evaluate_with_llm(goal, conversation_history, facts)
-        elif self.mode == GoalEvaluationMode.HYBRID:
-            return await self._evaluate_hybrid(goal, conversation_history, facts)
+        # For browser mode, include observation in the evaluation
+        if current_observation:
+            # Add browser context to facts
+            facts = dict(facts)  # Copy to avoid mutation
+            facts["current_url"] = current_observation.url
+            facts["page_title"] = current_observation.title
+            facts["visible_text"] = current_observation.visible_text[:2000]  # Excerpt
+
+        # Determine evaluation strategy based on evidence mode
+        if goal_evidence_mode == GoalEvidenceMode.SCREENSHOT:
+            # Screenshot-only evaluation
+            if screenshot_path:
+                return await self._evaluate_with_screenshot(goal, conversation, facts, screenshot_path)
+            else:
+                # Fallback to DOM if no screenshot available
+                return await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+
+        elif goal_evidence_mode == GoalEvidenceMode.DOM:
+            # DOM-only evaluation (existing behavior)
+            if self.mode == GoalEvaluationMode.KEYWORDS:
+                return self._evaluate_with_keywords(goal, conversation, current_observation)
+            elif self.mode == GoalEvaluationMode.INTELLIGENT:
+                return await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+            elif self.mode == GoalEvaluationMode.HYBRID:
+                return await self._evaluate_hybrid(goal, conversation, facts, current_observation)
+
+        elif goal_evidence_mode == GoalEvidenceMode.DOM_THEN_SCREENSHOT:
+            # Try DOM first, fallback to screenshot if confidence is low
+            if self.mode == GoalEvaluationMode.KEYWORDS:
+                dom_result = self._evaluate_with_keywords(goal, conversation, current_observation)
+            else:
+                dom_result = await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+
+            # If confidence is low and screenshot is available, try screenshot evaluation
+            if dom_result.confidence < 0.5 and screenshot_path:
+                screenshot_result = await self._evaluate_with_screenshot(goal, conversation, facts, screenshot_path)
+                # Use screenshot result if it has higher confidence
+                if screenshot_result.confidence > dom_result.confidence:
+                    screenshot_result.reasoning = f"DOM evaluation had low confidence ({dom_result.confidence:.2f}), using screenshot evaluation. {screenshot_result.reasoning}"
+                    return screenshot_result
+
+            return dom_result
+
+        elif goal_evidence_mode == GoalEvidenceMode.BOTH:
+            # Use both DOM and screenshot, combine results
+            dom_result = await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+
+            if screenshot_path:
+                screenshot_result = await self._evaluate_with_screenshot(goal, conversation, facts, screenshot_path)
+                # Average the confidences
+                combined_confidence = (dom_result.confidence + screenshot_result.confidence) / 2
+
+                # If both agree, use that result
+                if dom_result.goal_achieved == screenshot_result.goal_achieved:
+                    return GoalEvaluationResult(
+                        goal_achieved=dom_result.goal_achieved,
+                        confidence=combined_confidence,
+                        reasoning=f"Combined DOM+Screenshot evaluation. DOM: {dom_result.reasoning}\nScreenshot: {screenshot_result.reasoning}",
+                        evaluation_method="intelligent",
+                        fallback_used=False,
+                    )
+                else:
+                    # Disagreement - use screenshot as it's more reliable
+                    return GoalEvaluationResult(
+                        goal_achieved=screenshot_result.goal_achieved,
+                        confidence=screenshot_result.confidence,
+                        reasoning=f"DOM and screenshot disagreed. Using screenshot result. Screenshot: {screenshot_result.reasoning}",
+                        evaluation_method="intelligent",
+                        fallback_used=False,
+                    )
+
+            return dom_result
+
         else:
             raise ValueError(f"Unknown goal evaluation mode: {self.mode}")
     
     def _evaluate_with_keywords(
-        self, 
-        goal: str, 
-        conversation_history: List[Message]
+        self,
+        goal: str,
+        conversation: str,
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using keyword matching (legacy behavior).
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
-            
+            conversation: Conversation text
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
-        # Check for completion keywords in recent API responses
+        # Check for completion keywords in conversation and visible text
         goal_achieved = False
         matched_keywords = []
-        
-        if conversation_history:
-            recent_messages = conversation_history[-2:]  # Last 2 messages
-            for message in recent_messages:
-                if message.role == "assistant":
-                    message_lower = message.content.lower()
-                    for keyword in self.completion_keywords:
-                        if keyword.lower() in message_lower:
-                            goal_achieved = True
-                            matched_keywords.append(keyword)
-        
+        search_text = conversation.lower()
+
+        # Add browser visible text to search
+        if current_observation:
+            search_text += " " + current_observation.visible_text.lower()
+
+        # Check for keywords
+        for keyword in self.completion_keywords:
+            if keyword.lower() in search_text:
+                goal_achieved = True
+                matched_keywords.append(keyword)
+
         reasoning = f"Keyword evaluation: {'Found' if goal_achieved else 'No'} completion keywords"
         if matched_keywords:
             reasoning += f" (matched: {', '.join(matched_keywords)})"
-        
+
         return GoalEvaluationResult(
             goal_achieved=goal_achieved,
             confidence=1.0 if goal_achieved else 0.0,  # Keywords give binary confidence
@@ -127,25 +213,27 @@ class GoalEvaluator(BaseModel):
         )
     
     async def _evaluate_with_llm(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using LLM analysis.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
         try:
             # Build evaluation prompt
-            prompt = self._build_evaluation_prompt(goal, conversation_history, facts)
-            
+            prompt = self._build_evaluation_prompt(goal, conversation, facts, current_observation)
+
             # Create LLM agent for evaluation
             model = infer_model(self.model_name)
             # Only include max_tokens for evaluation - don't set temperature to avoid compatibility issues
@@ -154,25 +242,28 @@ class GoalEvaluator(BaseModel):
                 instructions="You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.",
                 model_settings={"max_tokens": 1000}  # Only include max_tokens, skip temperature for compatibility
             )
-            
-            # Verbose logging of the goal evaluation prompt
-            if self.verbose:
-                print("\n" + "="*80)
-                print("🔍 VERBOSE: GOAL EVALUATION PROMPT SENT TO PYDANTICAI")
-                print("="*80)
+
+            # Verbose/LLM-debug logging of the goal evaluation prompt
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                print(f"\n{sep}")
+                print(f"{label}: GOAL EVALUATION PROMPT SENT TO PYDANTICAI")
+                print(sep)
                 print(f"Model: {self.model_name}")
-                print(f"Model Settings: {{'max_tokens': 200}}")
                 print(f"Instructions: You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.")
-                print(f"Prompt: {prompt}")
-                print("="*80 + "\n")
-            
+                print()
+                print("── PROMPT ──")
+                print(prompt)
+                print(f"{sep}\n")
+
             # Get evaluation
             result = await agent.run(prompt)
             response = result.output.strip()
-            
+
             # Parse LLM response
             goal_achieved, confidence, reasoning = self._parse_llm_response(response)
-            
+
             return GoalEvaluationResult(
                 goal_achieved=goal_achieved,
                 confidence=confidence,
@@ -180,7 +271,7 @@ class GoalEvaluator(BaseModel):
                 evaluation_method="intelligent",
                 fallback_used=False
             )
-            
+
         except Exception as e:
             # Return failure result if LLM evaluation fails
             return GoalEvaluationResult(
@@ -192,50 +283,153 @@ class GoalEvaluator(BaseModel):
             )
     
     async def _evaluate_hybrid(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
     ) -> GoalEvaluationResult:
         """Evaluate goal completion using LLM with keyword fallback.
-        
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            current_observation: Optional browser observation
+
         Returns:
             Goal evaluation result
         """
-        # Try LLM evaluation first
         try:
-            llm_result = await self._evaluate_with_llm(goal, conversation_history, facts)
-            if llm_result.confidence > 0.5:  # Use LLM result if confident
-                return llm_result
-        except Exception:
-            pass
-        
-        # Fall back to keyword evaluation
-        keyword_result = self._evaluate_with_keywords(goal, conversation_history)
-        keyword_result.evaluation_method = "hybrid"
-        keyword_result.fallback_used = True
-        keyword_result.reasoning = f"LLM evaluation uncertain, using keyword fallback: {keyword_result.reasoning}"
-        
-        return keyword_result
-    
-    def _build_evaluation_prompt(
-        self, 
-        goal: str, 
-        conversation_history: List[Message], 
-        facts: Dict[str, Any]
-    ) -> str:
-        """Build the evaluation prompt for LLM analysis.
-        
+            # Try LLM evaluation first
+            llm_result = await self._evaluate_with_llm(goal, conversation, facts, current_observation)
+
+            # If confidence is too low, fall back to keywords
+            if llm_result.confidence < 0.5:
+                keyword_result = self._evaluate_with_keywords(goal, conversation, current_observation)
+                return GoalEvaluationResult(
+                    goal_achieved=keyword_result.goal_achieved,
+                    confidence=keyword_result.confidence,
+                    reasoning=f"Hybrid evaluation: LLM confidence {llm_result.confidence:.2f} too low, fell back to keywords. {keyword_result.reasoning}",
+                    evaluation_method="hybrid",
+                    fallback_used=True
+                )
+
+            return llm_result
+
+        except Exception as e:
+            # Fall back to keywords on error
+            keyword_result = self._evaluate_with_keywords(goal, conversation, current_observation)
+            return GoalEvaluationResult(
+                goal_achieved=keyword_result.goal_achieved,
+                confidence=keyword_result.confidence,
+                reasoning=f"Hybrid evaluation: LLM evaluation failed ({str(e)}), fell back to keywords. {keyword_result.reasoning}",
+                evaluation_method="hybrid",
+                fallback_used=True
+            )
+
+    async def _evaluate_with_screenshot(
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        screenshot_path: str,
+    ) -> GoalEvaluationResult:
+        """Evaluate goal completion using screenshot analysis with multimodal LLM.
+
         Args:
             goal: The goal to evaluate
-            conversation_history: Full conversation history
+            conversation: Conversation text
             facts: Available facts for context
-            
+            screenshot_path: Path to screenshot image
+
+        Returns:
+            Goal evaluation result
+        """
+        try:
+            import base64
+            from pathlib import Path
+
+            # Read and encode screenshot
+            screenshot_bytes = Path(screenshot_path).read_bytes()
+            base64_image = base64.b64encode(screenshot_bytes).decode('utf-8')
+            data_url = f"data:image/png;base64,{base64_image}"
+
+            # Build multimodal prompt
+            prompt = self._build_screenshot_evaluation_prompt(goal, conversation, facts)
+
+            # Create LLM agent for evaluation
+            # Use screenshot_model_name if specified, otherwise fall back to model_name
+            model_to_use = self.screenshot_model_name or self.model_name
+            model = infer_model(model_to_use)
+            agent = PydanticAgent(
+                model=model,
+                instructions="You are an expert at evaluating whether conversation goals have been achieved by analyzing screenshots. Be precise and analytical.",
+                model_settings={"max_tokens": 1000}
+            )
+
+            # Verbose/LLM-debug logging
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                print(f"\n{sep}")
+                print(f"{label}: GOAL EVALUATION WITH SCREENSHOT")
+                print(sep)
+                print(f"Model: {model_to_use}")
+                if self.screenshot_model_name:
+                    print(f"Using dedicated screenshot evaluation model")
+                print(f"Screenshot: {screenshot_path}")
+                print()
+                print("── PROMPT ──")
+                print(prompt)
+                print(f"{sep}\n")
+
+            # Run multimodal evaluation with image
+            result = await agent.run(
+                prompt,
+                message_history=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ]}
+                ]
+            )
+            response = result.output.strip()
+
+            # Parse LLM response
+            goal_achieved, confidence, reasoning = self._parse_llm_response(response)
+
+            return GoalEvaluationResult(
+                goal_achieved=goal_achieved,
+                confidence=confidence,
+                reasoning=f"Screenshot-based evaluation: {reasoning}",
+                evaluation_method="intelligent",
+                fallback_used=False
+            )
+
+        except Exception as e:
+            # Return failure result if screenshot evaluation fails
+            return GoalEvaluationResult(
+                goal_achieved=False,
+                confidence=0.0,
+                reasoning=f"Screenshot evaluation failed: {str(e)}",
+                evaluation_method="intelligent",
+                fallback_used=False
+            )
+
+    def _build_screenshot_evaluation_prompt(
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+    ) -> str:
+        """Build the evaluation prompt for screenshot-based analysis.
+
+        Args:
+            goal: The goal to evaluate
+            conversation: Conversation text
+            facts: Available facts for context
+
         Returns:
             Formatted evaluation prompt
         """
@@ -244,29 +438,91 @@ class GoalEvaluator(BaseModel):
             return self.custom_prompt.format(
                 goal=goal,
                 facts=json.dumps(facts, indent=2),
-                conversation=self._format_conversation_for_prompt(conversation_history)
+                conversation=conversation,
             )
-        
-        # Default evaluation prompt
+
+        # Build evaluation prompt
         prompt = f"""Given this conversation goal: "{goal}"
 
 User facts: {json.dumps(facts, indent=2)}
 
-Recent conversation history:
-{self._format_conversation_for_prompt(conversation_history[-6:])}
+Recent conversation:
+{conversation}
 
-Has the goal been definitively achieved? Consider:
-1. Has the user received confirmation that the action was completed?
-2. Are there concrete indicators of success (confirmation numbers, bookings, etc.)?
-3. Distinguish between promises ("I will do this") vs accomplishments ("This is done")
-4. Look for specific completion indicators, not just polite acknowledgments
+Analyze the screenshot to determine if the goal has been achieved. Consider:
+1. Is there visible confirmation of completion (success messages, confirmation numbers, booking details)?
+2. Does the UI show the desired end state (form submitted, action completed, goal reached)?
+3. Look for specific visual indicators like success icons, confirmation dialogs, completion screens
+4. Distinguish between intermediate steps vs final completion
 
 Respond in this exact format:
 RESULT: [ACHIEVED or NOT_ACHIEVED]
 CONFIDENCE: [0.0 to 1.0]
-REASONING: [Brief explanation of your decision]"""
+REASONING: [Brief explanation of your decision based on the screenshot]"""
 
         return prompt
+
+    def _build_evaluation_prompt(
+        self,
+        goal: str,
+        conversation: str,
+        facts: Dict[str, Any],
+        current_observation: Optional[BrowserObservation] = None,
+    ) -> str:
+        """Build the evaluation prompt for LLM analysis.
+
+        Args:
+            goal: The goal to evaluate
+            conversation: Conversation text
+            facts: Available facts for context
+            current_observation: Optional browser observation
+
+        Returns:
+            Formatted evaluation prompt
+        """
+        if self.custom_prompt:
+            # Use custom prompt with variable substitution
+            return self.custom_prompt.format(
+                goal=goal,
+                facts=json.dumps(facts, indent=2),
+                conversation=conversation,
+            )
+
+        # Build evaluation prompt
+        prompt_parts = [
+            f"Given this conversation goal: \"{goal}\"",
+            "",
+            f"User facts: {json.dumps(facts, indent=2)}",
+            "",
+        ]
+
+        # Add browser context if available
+        if current_observation:
+            prompt_parts.extend([
+                "Current browser state:",
+                f"  URL: {current_observation.url}",
+                f"  Title: {current_observation.title}",
+                f"  Visible text excerpt: {current_observation.visible_text[:500]}...",
+                "",
+            ])
+
+        prompt_parts.extend([
+            "Recent conversation:",
+            conversation,
+            "",
+            "Has the goal been definitively achieved? Consider:",
+            "1. Has the user received confirmation that the action was completed?",
+            "2. Are there concrete indicators of success (confirmation numbers, bookings, etc.)?",
+            "3. Distinguish between promises (\"I will do this\") vs accomplishments (\"This is done\")",
+            "4. Look for specific completion indicators, not just polite acknowledgments",
+            "",
+            "Respond in this exact format:",
+            "RESULT: [ACHIEVED or NOT_ACHIEVED]",
+            "CONFIDENCE: [0.0 to 1.0]",
+            "REASONING: [Brief explanation of your decision]",
+        ])
+
+        return "\n".join(prompt_parts)
     
     def _format_conversation_for_prompt(self, messages: List[Message]) -> str:
         """Format conversation history for the evaluation prompt.
@@ -342,6 +598,7 @@ class ResponseGenerator(BaseModel):
     model_settings: Dict[str, Any] = Field(default_factory=dict, description="Model settings")
     facts: Dict[str, Any] = Field(..., description="Available facts")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
+    llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
     
     def _create_agent(self) -> PydanticAgent:
         """Create a PydanticAI agent instance."""
@@ -390,16 +647,23 @@ class ResponseGenerator(BaseModel):
             # Create and use PydanticAI agent
             agent = self._create_agent()
             
-            # Verbose logging of the complete system prompt
-            if self.verbose:
-                print("\n" + "="*80)
-                print("🔍 VERBOSE: COMPLETE SYSTEM PROMPT SENT TO PYDANTICAI")
-                print("="*80)
-                print(f"Model: {self.model_name}")
+            # Verbose/LLM-debug logging of the complete system prompt
+            if self.verbose or self.llm_debug:
+                sep = "=" * 80
+                label = "🔬 LLM DEBUG" if self.llm_debug else "🔍 VERBOSE"
+                turn_num = conversation_state.turn_count + 1
+                print(f"\n{sep}")
+                print(f"{label}: REPLICANT RESPONSE GENERATION  (turn={turn_num})")
+                print(sep)
+                print(f"Model         : {self.model_name}")
                 print(f"Model Settings: {self.model_settings}")
-                print(f"System Prompt: {self.system_prompt}")
-                print(f"Context: {context}")
-                print("="*80 + "\n")
+                print()
+                print("── SYSTEM PROMPT ──")
+                print(self.system_prompt)
+                print()
+                print("── USER CONTEXT ──")
+                print(context)
+                print(f"{sep}\n")
             
             result = await agent.run(context)
             
@@ -445,12 +709,13 @@ class ReplicantAgent(BaseModel):
     goal_evaluator: GoalEvaluator = Field(..., description="Goal evaluation utility")
     
     @classmethod
-    def create(cls, config: ReplicantConfig, verbose: bool = False) -> "ReplicantAgent":
+    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "ReplicantAgent":
         """Create a new Replicant agent.
         
         Args:
             config: Replicant configuration
             verbose: Enable verbose output for system prompts
+            llm_debug: Print complete LLM prompts on every call
             
         Returns:
             Configured Replicant agent
@@ -467,10 +732,11 @@ class ReplicantAgent(BaseModel):
             system_prompt=config.system_prompt,
             model_settings=model_settings,
             facts=config.facts,
-            verbose=verbose
+            verbose=verbose,
+            llm_debug=llm_debug,
         )
         
-        goal_evaluator = GoalEvaluator.create(config, verbose=verbose)
+        goal_evaluator = GoalEvaluator.create(config, verbose=verbose, llm_debug=llm_debug)
         
         return cls(
             config=config,
@@ -509,14 +775,26 @@ class ReplicantAgent(BaseModel):
         
         return True
     
-    def get_initial_message(self) -> str:
+    def get_initial_message(self) -> Optional[str]:
         """Get the initial message to start the conversation.
         
         Returns:
-            Initial message
+            Initial message if configured, otherwise None.
         """
         return self.config.initial_message
-    
+
+    async def generate_opening_message(self) -> str:
+        """Generate an opening message from goal and facts when no initial_message is configured."""
+        prompt = (
+            f"You are starting a new conversation to achieve this goal: {self.config.goal}\n"
+            f"Available facts: {json.dumps(self.config.facts, indent=2)}\n\n"
+            "Write a natural opening message as a user. Be concise and direct."
+        )
+        return await self.response_generator.generate_response(
+            api_message=prompt,
+            conversation_state=self.state,
+        )
+
     async def process_api_response(self, api_response: str, triggering_message: Optional[str] = None) -> str:
         """Process an API response and generate the next user message.
         

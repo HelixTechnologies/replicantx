@@ -3,23 +3,30 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 
-**ReplicantX** is an end-to-end testing harness for AI agents that communicates via web service APIs. It enables you to run comprehensive test scenarios against live HTTP APIs with support for multiple authentication methods and detailed reporting.
+**ReplicantX** is an end-to-end testing harness for AI agents that communicates via web service APIs. It enables you to run comprehensive test scenarios against live HTTP APIs with support for multiple authentication methods, browser automation, and detailed reporting.
 
 ## ✨ Features
 
-- **Two Test Levels**: 
+- **Two Interaction Modes**:
+  - **API Mode**: Test HTTP APIs directly with structured requests/responses
+  - **Browser Mode** 🆕: Automate web applications using Playwright with intelligent visual goal evaluation
+- **Two Test Levels**:
   - **Level 1 (Basic)**: Fixed user messages with deterministic assertions
   - **Level 2 (Agent)**: Intelligent Replicant agent with configurable facts and conversation goals
 - **Pydantic-Based Replicant Agent**: Smart conversational agent that acts like a real user
 - **Configurable Facts & Behavior**: Agents can have knowledge (Name, Preferences) and custom personalities
+- **Screenshot-Based Goal Evaluation**: Multimodal LLM evaluation with vision models for accurate UI state detection
+- **Smart Element Ranking**: Chat-aware element prioritization for natural web interaction
 - **Real-time Monitoring**: Watch mode (`--watch`) for live conversation monitoring
 - **Technical Debugging**: Debug mode (`--debug`) with detailed HTTP, validation, and AI processing logs
-- **Multiple Authentication**: Supabase email+password, custom JWT, or no-auth
+- **Multiple Authentication**: Supabase email/password, Supabase magic link, custom JWT, or no-auth
 - **CLI Interface**: Easy-to-use command-line interface with `replicantx run`
 - **Parallel Execution**: Run multiple test scenarios concurrently for faster execution
 - **Automatic .env Loading**: No manual environment variable sourcing required
 - **GitHub Actions Ready**: Built-in workflow for PR testing with Render preview URLs
 - **Rich Reporting**: Markdown and JSON reports with timing and assertion results
+- **Standalone Issue Triage**: Write browser issue bundles locally and optionally auto-file high-confidence GitHub issues from the CLI
+- **Playwright Tracing**: Capture browser traces for debugging with `playwright show-trace`
 - **Retry & Backoff**: Robust HTTP client with automatic retry logic
 
 ## 🚀 Quick Start
@@ -27,7 +34,14 @@
 ### Installation
 
 ```bash
+# Basic installation (for API mode)
 pip install replicantx[cli]
+
+# For browser mode (includes Playwright)
+pip install replicantx[cli]
+
+# Install Playwright browsers (one-time setup for browser mode)
+playwright install
 ```
 
 ### Basic Usage
@@ -109,6 +123,253 @@ replicantx run tests/my_test.yaml --report report.md
 
 3. View the generated report in `report.md`
 
+### 🌐 Browser Mode (Playwright Automation)
+
+**NEW:** Browser mode enables end-to-end testing of web applications using Playwright automation. The Replicant agent can interact with web pages naturally through chat, clicking buttons, and filling forms, with intelligent visual goal evaluation.
+
+#### Key Features
+
+- **Playwright Automation**: Control Chromium, Firefox, or WebKit browsers
+- **Multimodal Goal Evaluation**: Screenshot-based evaluation using vision models (GPT-4o, Claude, etc.)
+- **Smart Chat Detection**: Heuristics to find chat inputs without testids
+- **Intelligent Element Ranking**: Prioritizes elements near chat thread
+- **Flexible Evidence Modes**: DOM, screenshot, or hybrid evaluation strategies
+- **Supabase Magic Link Auth**: Auto-generates users for testing
+- **Browser Tracing**: Capture traces for debugging with `playwright show-trace`
+
+#### Quick Example
+
+```yaml
+# tests/browser_test.yaml
+name: "Browser Mode - Flight Booking"
+level: agent
+base_url: "https://app.example.com"  # Reference only in browser mode
+auth:
+  provider: supabase_magic_link
+  project_url: "{{ env.SUPABASE_URL }}"
+  service_role_key: "{{ env.SUPABASE_SERVICE_ROLE_KEY }}"
+  user_mode: generated  # Auto-generates unique email
+  app_refresh_endpoint: "https://app.example.com/auth/refresh"
+
+replicant:
+  interaction_mode: browser  # Enable browser mode
+  goal: "Complete a flight booking from London to Paris"
+  facts:
+    name: "Test User"
+    origin: "London"
+    destination: "Paris"
+  system_prompt: |
+    You are a user trying to book a flight.
+    Use chat, but click suggested buttons when they help.
+  initial_message: "Hi, I'd like to book a flight from London to Paris next week."
+
+  # Main LLM for response generation (smaller, faster)
+  llm:
+    model: "openai:gpt-4.1-mini"
+
+  browser:
+    start_url: "https://app.example.com"
+    headless: true
+
+    # Smart evaluation: DOM first, screenshot fallback if unsure
+    goal_evidence: dom_then_screenshot
+
+    # Use vision model for screenshots (better visual understanding)
+    screenshot_evaluation_model: "openai:gpt-5.2"
+
+    # Capture artifacts for debugging
+    screenshot_on_failure: true
+    trace: retain-on-failure
+```
+
+#### Installation with Browser Support
+
+```bash
+# Install with Playwright
+pip install replicantx[cli]
+
+# Install Playwright browsers (one-time)
+playwright install
+```
+
+#### Running Browser Mode Tests
+
+```bash
+# Run with watch mode (see live browser interaction)
+replicantx run tests/browser_test.yaml --watch
+
+# Run with debug mode (see technical details)
+replicantx run tests/browser_test.yaml --debug
+
+# Watch the actual browser window
+# set replicant.browser.headless: false in the YAML, then run:
+replicantx run tests/browser_test.yaml --watch
+```
+
+#### Browser Issue Triage and GitHub Autofiling
+
+ReplicantX can now capture browser issues during standalone CLI runs without relying on GitHub Actions.
+
+Important behavior:
+- A first-party `401`, `500`, console error, or page error does **not** automatically stop the Replicant.
+- If the browser flow is still progressing, the Replicant continues trying to complete the goal.
+- A scenario can therefore **pass** and still produce an issue bundle or GitHub issue for a non-blocking bug.
+
+No scenario YAML changes are required for this. Enable it from the CLI:
+
+```bash
+# Local draft only: write issue.md + issue_bundle.json, do not file GitHub issues
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --issue-artifact-upload off \
+  --issue-output artifacts/issues
+
+# Auto-file high-confidence issues directly to GitHub
+replicantx run tests/browser_test.yaml \
+  --issue-mode auto-high-confidence \
+  --issue-repo HelixTechnologies/helix-agent
+
+# Use a repo-specific Logfire query definition
+replicantx run tests/browser_test.yaml \
+  --issue-mode draft-only \
+  --logfire-config replicantx.logfire.yaml
+```
+
+Issue handling modes:
+- `off`: do not run issue processing
+- `draft-only`: write local issue drafts and bundles only
+- `auto-high-confidence`: auto-file `auto_file` issues and keep local bundles for everything processed
+
+What gets written to `--issue-output`:
+- `issue_bundle.json`: structured diagnostics, classification, artifacts, and Logfire excerpt
+- `issue.md`: rendered GitHub issue body draft
+- Browser artifacts remain in the normal scenario artifact directory and are linked from the bundle
+
+Classifier outcomes:
+- `auto_file`: high-confidence app bug, eligible for GitHub filing in `auto-high-confidence` mode
+- `review`: suspicious or ambiguous issue, bundle written locally but no GitHub issue created
+- `skip`: likely automation/control limitation, bundle written locally for reference but no GitHub issue created
+
+Integration environment variables:
+
+```bash
+# GitHub issue creation
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token
+
+# Logfire enrichment
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_BASE_URL=https://logfire-api.pydantic.dev   # optional
+REPLICANTX_LOGFIRE_SERVICE_NAME=helix-api                      # optional
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml             # optional
+
+# Artifact uploads (private Supabase Storage + signed URLs)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+REPLICANTX_ARTIFACT_BUCKET=replicantx-artifacts                # optional
+REPLICANTX_ARTIFACT_SIGNED_URL_TTL_SECONDS=604800              # optional
+
+# Optional execution label used in bundles/issues
+REPLICANTX_ENVIRONMENT=staging
+```
+
+Notes:
+- If you want completely local drafts with no artifact upload, use `--issue-artifact-upload off`.
+- Artifact upload is useful for GitHub issues because the issue body can include signed links to the relevant screenshots and traces only.
+- `--issue-repo` must be in `owner/name` format.
+- Logfire query config is auto-discovered from `replicantx.logfire.yaml` or `replicantx.logfire.yml` if present.
+
+#### Configurable Logfire Query
+
+The Logfire query is now configurable so different products can map ReplicantX’s extracted browser identities onto their own Logfire record structure.
+
+Default lookup order:
+- `--logfire-config <path>`
+- `REPLICANTX_LOGFIRE_CONFIG`
+- `replicantx.logfire.yaml`
+- `replicantx.logfire.yml`
+- built-in default query
+
+Example `replicantx.logfire.yaml`:
+
+```yaml
+service_name: product-api
+static_filters:
+  - "service_name = {service_name}"
+  - "attributes->>'tenant' = 'acme'"
+correlation_joiner: and
+correlation_rules:
+  - identity_field: user_id
+    expressions:
+      - "attributes->>'actor_id' = {value}"
+      - "attributes->>'user_id' = {value}"
+    combine_with: or
+  - identity_field: conversation_id
+    expressions:
+      - "attributes->>'session_key' = {value}"
+time_window:
+  before_seconds: 30
+  after_seconds: 45
+limit: 10
+```
+
+Supported placeholders inside query fragments:
+- `{value}`: current identity value for a correlation rule
+- `{service_name}`: configured service name
+- `{environment}`: execution environment label when available
+- `{user_id}` and `{conversation_id}`: extracted browser identity values
+
+See [replicantx.logfire.example.yaml](replicantx.logfire.example.yaml) for a working starting point.
+
+#### Environment Variables
+
+```bash
+# Supabase Magic Link Authentication
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key  # Admin key for magic links
+
+# LLM API Keys (for Replicant agent)
+OPENAI_API_KEY=sk-your-openai-key  # For gpt-4.1-mini, gpt-5.2, etc.
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key  # For Claude models
+
+# App Configuration
+APP_START_URL=https://app-qa.example.com  # Override start_url
+```
+
+#### Configuration Options
+
+**Evidence Modes** (`browser.goal_evidence`):
+
+| Mode | Description | Speed | Accuracy |
+|------|-------------|-------|----------|
+| `dom` | Text/DOM only | ⚡⚡⚡ Fastest | Good |
+| `screenshot` | Visual analysis | 🐢 Slowest | Excellent |
+| `dom_then_screenshot` | Smart hybrid | ⚡⚡ Fast | Very Good |
+| `both` | Combined | ⚡ Moderate | Excellent |
+
+**Model Selection**:
+
+```yaml
+replicant:
+  # Tiered models for cost optimization
+  llm:
+    model: "openai:gpt-4.1-mini"  # Fast for responses
+
+  goal_evaluation_model: "openai:gpt-4.1-mini"  # Fast for DOM
+
+  browser:
+    screenshot_evaluation_model: "openai:gpt-5.2"  # Vision for screenshots
+```
+
+#### For Complete Documentation
+
+📖 **See [docs/browser-mode-config.md](docs/browser-mode-config.md)** for:
+- Complete configuration reference
+- Model selection strategies
+- Cost optimization tips
+- Trace debugging guide
+- Standalone issue reporting and GitHub autofiling
+- Best practices and examples
+
 ### 🔐 Environment Variables & Configuration
 
 ReplicantX **automatically detects environment variables** from your system, `.env` files, and CI/CD environments. No special configuration needed when installed as a dependency!
@@ -142,6 +403,14 @@ export ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
 export SUPABASE_URL=https://your-project.supabase.co
 export SUPABASE_ANON_KEY=your-supabase-anon-key
 
+# Supabase Service Role Key (for browser mode magic link auth)
+export SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Browser issue triage / autofiling
+export REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token
+export REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+export REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
+
 # Target API Configuration
 export REPLICANTX_TARGET=your-api-domain.com
 
@@ -159,7 +428,11 @@ cat > .env << 'EOF'
 OPENAI_API_KEY=sk-dev-key
 REPLICANTX_TARGET=dev-api.example.com
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-supabase-key
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key  # For browser mode
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token  # For CLI GitHub issue filing
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
 EOF
 
 # Just run tests - no need to source .env!
@@ -211,7 +484,8 @@ replicant:
 2. **Add secrets:**
    - `OPENAI_API_KEY` = `sk-your-openai-key`
    - `SUPABASE_URL` = `https://your-project.supabase.co`
-   - `SUPABASE_ANON_KEY` = `your-supabase-key`
+   - `SUPABASE_ANON_KEY` = `your-supabase-anon-key`
+   - `SUPABASE_SERVICE_ROLE_KEY` = `your-service-role-key` (for browser mode)
    - `REPLICANTX_TARGET` = `api.yourproject.com`
 
 3. **Use in workflow:**
@@ -249,6 +523,7 @@ REPLICANTX_TARGET=https://api.yourproject.com
 # Supabase Authentication
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key  # For browser mode magic link auth
 TEST_USER_EMAIL=test@example.com
 TEST_USER_PASSWORD=testpassword123
 
@@ -290,6 +565,10 @@ OPENAI_API_KEY=sk-your-openai-key-here
 REPLICANTX_TARGET=https://your-api-domain.com
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key-here
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here  # For browser mode
+REPLICANTX_GITHUB_TOKEN=github_pat_or_app_token       # For issue autofiling
+REPLICANTX_LOGFIRE_API_KEY=your-logfire-read-token
+REPLICANTX_LOGFIRE_CONFIG=replicantx.logfire.yaml
 EOF
 ```
 
@@ -400,6 +679,15 @@ replicantx run tests/*.yaml --parallel
 
 # Run with limited concurrency to prevent API overload
 replicantx run tests/*.yaml --parallel --max-concurrent 3
+
+# Write browser issue bundles locally without filing GitHub issues
+replicantx run tests/browser_test.yaml --issue-mode draft-only --issue-artifact-upload off
+
+# Auto-file high-confidence browser issues to a GitHub repo
+replicantx run tests/browser_test.yaml --issue-mode auto-high-confidence --issue-repo HelixTechnologies/helix-agent
+
+# Override or supply a repo-specific Logfire query definition
+replicantx run tests/browser_test.yaml --issue-mode draft-only --logfire-config replicantx.logfire.yaml
 
 # Validate test files without running
 replicantx validate tests/*.yaml --verbose
@@ -632,6 +920,19 @@ auth:
   password: password123
   project_url: "{{ env.SUPABASE_URL }}"
   api_key: "{{ env.SUPABASE_ANON_KEY }}"
+```
+
+#### Supabase Magic Link (Browser Mode)
+```yaml
+auth:
+  provider: supabase_magic_link
+  project_url: "{{ env.SUPABASE_URL }}"
+  service_role_key: "{{ env.SUPABASE_SERVICE_ROLE_KEY }}"
+  user_mode: generated  # Auto-generates unique email
+  # Or use fixed user:
+  # user_mode: fixed
+  # email: "test@example.com"
+  app_refresh_endpoint: "https://app.example.com/auth/refresh"
 ```
 
 #### JWT

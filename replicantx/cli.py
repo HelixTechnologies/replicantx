@@ -31,8 +31,16 @@ except ImportError:
     pass
 
 from . import __version__
-from .models import ScenarioConfig, TestSuiteReport, TestLevel
-from .scenarios import BasicScenarioRunner, AgentScenarioRunner
+from .issue_reporting import IssueProcessingConfig, IssueProcessor
+from .models import (
+    InteractionMode,
+    IssueArtifactUploadMode,
+    IssueMode,
+    ScenarioConfig,
+    TestLevel,
+    TestSuiteReport,
+)
+from .scenarios import BasicScenarioRunner, AgentScenarioRunner, BrowserScenarioRunner
 from .reporters import MarkdownReporter, JSONReporter
 
 app = typer.Typer(
@@ -78,6 +86,9 @@ def run(
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug mode: Shows detailed technical information including HTTP client setup, request payloads, response validation, AI processing, and assertion results. Perfect for troubleshooting failed tests and performance analysis."
     ),
+    llm_debug: bool = typer.Option(
+        False, "--llm-debug", help="Enable LLM debug mode: Prints the complete system prompt and user message sent to the LLM on every turn (both API agent and browser planner). Use this to inspect exactly what instructions and context are supplied to the model each step."
+    ),
     watch: bool = typer.Option(
         False, "--watch", help="Enable watch mode: Real-time conversation monitoring with live timestamps, user/assistant messages, step results, and final summaries. Perfect for demos, monitoring long tests, and validating conversation flow."
     ),
@@ -93,11 +104,37 @@ def run(
     max_concurrent: Optional[int] = typer.Option(
         None, "--max-concurrent", help="Maximum number of scenarios to run concurrently (default: unlimited)"
     ),
+    issue_mode: IssueMode = typer.Option(
+        IssueMode.OFF,
+        "--issue-mode",
+        help="Browser issue handling mode: off, auto-high-confidence, or draft-only",
+    ),
+    issue_repo: str = typer.Option(
+        "HelixTechnologies/helix-agent",
+        "--issue-repo",
+        help="GitHub repository to file issues against, in owner/name format",
+    ),
+    issue_artifact_upload: IssueArtifactUploadMode = typer.Option(
+        IssueArtifactUploadMode.ON,
+        "--issue-artifact-upload",
+        help="Whether to upload issue artifacts when issue processing is enabled",
+    ),
+    issue_output: str = typer.Option(
+        "artifacts/issues",
+        "--issue-output",
+        help="Directory to write issue bundles and markdown drafts",
+    ),
+    logfire_config: Optional[str] = typer.Option(
+        None,
+        "--logfire-config",
+        help="Optional path to a Logfire query YAML config. Defaults to replicantx.logfire.yaml if present.",
+    ),
 ):
     """Run test scenarios from YAML files.
 
 MONITORING & DEBUGGING:
   --debug: Technical deep-dive with HTTP requests, AI model details, and validation results
+  --llm-debug: Prints complete system prompt + user message for every LLM call each turn
   --watch: Real-time conversation monitoring with timestamps and live updates  
   --debug --watch: Combined mode for comprehensive analysis during development
 
@@ -106,6 +143,9 @@ EXAMPLES:
   replicantx run tests/agent_test.yaml --watch --debug
   replicantx run tests/*.yaml --ci --report results.json
   replicantx run tests/*.yaml --parallel --max-concurrent 3
+  replicantx run tests/browser_test.yaml --issue-mode draft-only --issue-artifact-upload off
+  replicantx run tests/browser_test.yaml --issue-mode auto-high-confidence --issue-repo HelixTechnologies/helix-agent
+  replicantx run tests/browser_test.yaml --issue-mode draft-only --logfire-config replicantx.logfire.yaml
     """
     console.print(f"🚀 ReplicantX {__version__} - Starting test execution")
     
@@ -139,11 +179,17 @@ EXAMPLES:
         ci_mode=ci,
         verbose=verbose,
         debug=debug,
+        llm_debug=llm_debug,
         watch=watch,
         timeout_override=timeout,
         max_retries_override=max_retries,
         parallel=parallel,
         max_concurrent=max_concurrent,
+        issue_mode=issue_mode,
+        issue_repo=issue_repo,
+        issue_artifact_upload=issue_artifact_upload,
+        issue_output=issue_output,
+        logfire_config=logfire_config,
     ))
 
 
@@ -153,11 +199,17 @@ async def run_scenarios_async(
     ci_mode: bool = False,
     verbose: bool = False,
     debug: bool = False,
+    llm_debug: bool = False,
     watch: bool = False,
     timeout_override: Optional[int] = None,
     max_retries_override: Optional[int] = None,
     parallel: bool = False,
     max_concurrent: Optional[int] = None,
+    issue_mode: IssueMode = IssueMode.OFF,
+    issue_repo: str = "HelixTechnologies/helix-agent",
+    issue_artifact_upload: IssueArtifactUploadMode = IssueArtifactUploadMode.ON,
+    issue_output: str = "artifacts/issues",
+    logfire_config: Optional[str] = None,
 ):
     """Run scenarios asynchronously."""
     # Initialize test suite report
@@ -215,6 +267,7 @@ async def run_scenarios_async(
                 ci_mode=ci_mode,
                 verbose=verbose,
                 debug=debug,
+                llm_debug=llm_debug,
                 watch=watch,
                 max_concurrent=max_concurrent,
             )
@@ -227,14 +280,27 @@ async def run_scenarios_async(
                 ci_mode=ci_mode,
                 verbose=verbose,
                 debug=debug,
+                llm_debug=llm_debug,
                 watch=watch,
             )
     
     # Finalize report
     suite_report.completed_at = datetime.now()
-    
+
+    if issue_mode != IssueMode.OFF:
+        issue_config = IssueProcessingConfig.from_runtime(
+            issue_mode=issue_mode,
+            issue_repo=issue_repo,
+            artifact_upload_mode=issue_artifact_upload,
+            issue_output_dir=issue_output,
+            logfire_config_path=logfire_config,
+        )
+        processor = IssueProcessor(config=issue_config)
+        await processor.process_suite(suite_report.scenario_reports)
+
     # Display summary
     display_summary(suite_report, verbose)
+    display_issue_summary(suite_report, issue_mode)
     
     # Generate reports
     if report_path:
@@ -255,25 +321,34 @@ async def run_scenarios_sequential(
     ci_mode: bool,
     verbose: bool,
     debug: bool,
-    watch: bool,
+    llm_debug: bool = False,
+    watch: bool = False,
 ):
     """Run scenarios sequentially."""
     for file_path, config in scenarios:
         task = progress.add_task(f"Running {Path(file_path).name}...", total=None)
-        
+
         try:
-            # Create appropriate runner based on level
+            # Create appropriate runner based on level and interaction mode
             if config.level == TestLevel.BASIC:
                 runner = BasicScenarioRunner(config, debug=debug, watch=watch)
             elif config.level == TestLevel.AGENT:
-                runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+                # Check if browser mode
+                if config.replicant and config.replicant.interaction_mode == InteractionMode.BROWSER:
+                    # Import auth providers
+                    from .auth import create_auth_provider
+                    auth_provider = create_auth_provider(config.auth)
+                    runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
+                else:
+                    runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
             else:
                 raise ValueError(f"Unsupported test level: {config.level}")
-            
+
             # Run the scenario
             scenario_report = await runner.run()
+            scenario_report.source_file = file_path
             suite_report.scenario_reports.append(scenario_report)
-            
+
             # Update counters
             if scenario_report.passed:
                 suite_report.passed_scenarios += 1
@@ -281,21 +356,21 @@ async def run_scenarios_sequential(
             else:
                 suite_report.failed_scenarios += 1
                 progress.update(task, description=f"❌ {Path(file_path).name}")
-            
+
             if verbose:
                 console.print(f"  Steps: {scenario_report.passed_steps}/{scenario_report.total_steps}")
                 console.print(f"  Duration: {scenario_report.duration_seconds:.2f}s")
                 if scenario_report.error:
                     console.print(f"  Error: {scenario_report.error}")
-            
+
         except Exception as e:
             console.print(f"❌ Error running {file_path}: {e}")
             suite_report.failed_scenarios += 1
             progress.update(task, description=f"❌ {Path(file_path).name} (error)")
-            
+
             if ci_mode:
                 raise typer.Exit(1)
-        
+
         progress.remove_task(task)
 
 
@@ -306,7 +381,8 @@ async def run_scenarios_parallel(
     ci_mode: bool,
     verbose: bool,
     debug: bool,
-    watch: bool,
+    llm_debug: bool = False,
+    watch: bool = False,
     max_concurrent: Optional[int] = None,
 ):
     """Run scenarios in parallel."""
@@ -326,9 +402,9 @@ async def run_scenarios_parallel(
             # Apply semaphore if concurrency is limited
             if semaphore:
                 async with semaphore:
-                    return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+                    return await _execute_scenario(file_path, config, task_id, debug, watch, verbose, llm_debug)
             else:
-                return await _execute_scenario(file_path, config, task_id, debug, watch, verbose)
+                return await _execute_scenario(file_path, config, task_id, debug, watch, verbose, llm_debug)
                 
         except Exception as e:
             console.print(f"❌ Error running {file_path}: {e}")
@@ -394,19 +470,28 @@ async def _execute_scenario(
     debug: bool,
     watch: bool,
     verbose: bool,
+    llm_debug: bool = False,
 ):
     """Execute a single scenario and return the result."""
-    # Create appropriate runner based on level
+    # Create appropriate runner based on level and interaction mode
     if config.level == TestLevel.BASIC:
         runner = BasicScenarioRunner(config, debug=debug, watch=watch)
     elif config.level == TestLevel.AGENT:
-        runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose)
+        # Check if browser mode
+        if config.replicant and config.replicant.interaction_mode == InteractionMode.BROWSER:
+            # Import auth providers
+            from .auth import create_auth_provider
+            auth_provider = create_auth_provider(config.auth)
+            runner = BrowserScenarioRunner(config, auth_provider, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
+        else:
+            runner = AgentScenarioRunner(config, debug=debug, watch=watch, verbose=verbose, llm_debug=llm_debug)
     else:
         raise ValueError(f"Unsupported test level: {config.level}")
-    
+
     # Run the scenario
     scenario_report = await runner.run()
-    
+    scenario_report.source_file = file_path
+
     return {
         'file_path': file_path,
         'config': config,
@@ -556,6 +641,50 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
                         console.print(f"💭 {scenario.justification}")
                     if scenario.error:
                         console.print(f"❌ Error: {scenario.error}")
+
+
+def display_issue_summary(
+    suite_report: TestSuiteReport,
+    issue_mode: IssueMode,
+) -> None:
+    """Display issue processing results when enabled."""
+    if issue_mode == IssueMode.OFF:
+        return
+
+    processed = [
+        scenario
+        for scenario in suite_report.scenario_reports
+        if scenario.issue_classification is not None
+    ]
+    if not processed:
+        console.print("\n🪲 Issue Processing")
+        console.print("No browser scenarios produced issue bundles.")
+        return
+
+    console.print("\n🪲 Issue Processing")
+    table = Table(show_header=True, header_style="bold blue")
+    table.add_column("Scenario")
+    table.add_column("Decision")
+    table.add_column("Bundle")
+    table.add_column("Issue")
+
+    for scenario in processed:
+        decision = scenario.issue_classification.decision.value
+        bundle = scenario.issue_bundle_path or "n/a"
+        issue = scenario.issue_url or (
+            "draft only"
+            if scenario.issue_classification.decision.value == "auto_file"
+            and issue_mode == IssueMode.DRAFT_ONLY
+            else "not filed"
+        )
+        table.add_row(
+            scenario.scenario_name,
+            decision,
+            bundle,
+            issue,
+        )
+
+    console.print(table)
 
 
 def generate_reports(suite_report: TestSuiteReport, report_path: str):

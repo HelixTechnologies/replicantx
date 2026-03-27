@@ -18,7 +18,7 @@ from ..models import ScenarioReport, TestSuiteReport, StepResult, AssertionResul
 class MarkdownReporter:
     """Generates Markdown reports from test results."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Markdown reporter."""
         pass
     
@@ -69,6 +69,20 @@ class MarkdownReporter:
         if report.completed_at:
             lines.append(f"**Completed:** {report.completed_at.strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("")
+
+        if report.issue_classification:
+            lines.append("## Issue Triage")
+            lines.append(f"**Decision:** `{report.issue_classification.decision.value}`")
+            lines.append(f"**Confidence:** `{report.issue_classification.confidence:.2f}`")
+            lines.append(f"**Subtypes:** `{', '.join(report.issue_classification.subtypes)}`")
+            lines.append(f"**Fingerprint:** `{report.issue_classification.fingerprint}`")
+            if report.issue_bundle_path:
+                lines.append(f"**Issue Bundle:** `{report.issue_bundle_path}`")
+            if report.issue_markdown_path:
+                lines.append(f"**Issue Draft:** `{report.issue_markdown_path}`")
+            if report.issue_url:
+                lines.append(f"**Issue URL:** {report.issue_url}")
+            lines.append("")
         
         # Complete conversation history for agent scenarios
         if hasattr(report, 'conversation_history') and report.conversation_history:
@@ -117,6 +131,12 @@ class MarkdownReporter:
                 lines.append(f"**Status:** {status_emoji} {'PASSED' if step.passed else 'FAILED'}")
                 lines.append(f"**Latency:** {step.latency_ms:.2f}ms")
                 lines.append(f"**Timestamp:** {step.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+                if step.planner_reasoning:
+                    lines.append(f"**Planner Reasoning:** {step.planner_reasoning}")
+                if step.action_type:
+                    lines.append(f"**Action Type:** `{step.action_type}`")
+                if step.page_url:
+                    lines.append(f"**Page URL:** `{step.page_url}`")
                 lines.append("")
                 
                 # User message
@@ -149,6 +169,12 @@ class MarkdownReporter:
                     lines.append(f"```")
                     lines.append(step.error)
                     lines.append("```")
+                    lines.append("")
+
+                if step.artifact_paths:
+                    lines.append("**Artifacts:**")
+                    for name, path in step.artifact_paths.items():
+                        lines.append(f"- {name}: `{path}`")
                     lines.append("")
                 
                 lines.append("---")
@@ -217,7 +243,16 @@ class MarkdownReporter:
                 lines.append(f"**Duration:** {scenario.duration_seconds:.2f}s")
                 if scenario.justification:
                     lines.append(f"**Justification:** {scenario.justification}")
-                
+                if scenario.issue_classification:
+                    lines.append(
+                        f"**Issue Triage:** `{scenario.issue_classification.decision.value}`"
+                        f" ({', '.join(scenario.issue_classification.subtypes)})"
+                    )
+                    if scenario.issue_url:
+                        lines.append(f"**Issue URL:** {scenario.issue_url}")
+                    elif scenario.issue_markdown_path:
+                        lines.append(f"**Issue Draft:** `{scenario.issue_markdown_path}`")
+
                 # Goal evaluation details for agent scenarios
                 if scenario.goal_evaluation_result:
                     if scenario.goal_evaluation_result.evaluation_method == 'keywords':

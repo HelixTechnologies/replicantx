@@ -10,9 +10,15 @@ from test scenario results for programmatic analysis and integration.
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Union
+from typing import Any, Dict, Union
 
-from ..models import ScenarioReport, TestSuiteReport
+from ..models import (
+    AssertionResult,
+    GoalEvaluationResult,
+    ScenarioReport,
+    StepResult,
+    TestSuiteReport,
+)
 
 
 class JSONReporter:
@@ -58,6 +64,7 @@ class JSONReporter:
         return {
             "report_type": "scenario",
             "scenario_name": report.scenario_name,
+            "source_file": report.source_file,
             "status": "passed" if report.passed else "failed",
             "summary": {
                 "total_steps": report.total_steps,
@@ -74,6 +81,12 @@ class JSONReporter:
             "error": report.error,
             "justification": report.justification,
             "goal_evaluation_result": self._serialize_goal_evaluation_result(report.goal_evaluation_result) if report.goal_evaluation_result else None,
+            "artifact_summary": report.artifact_summary,
+            "browser_diagnostics": self._serialize_model(report.browser_diagnostics),
+            "issue_classification": self._serialize_model(report.issue_classification),
+            "issue_bundle_path": report.issue_bundle_path,
+            "issue_markdown_path": report.issue_markdown_path,
+            "issue_url": report.issue_url,
             "step_results": [
                 self._serialize_step_result(step) for step in report.step_results
             ],
@@ -129,7 +142,7 @@ class JSONReporter:
             }
         }
     
-    def _serialize_step_result(self, step: 'StepResult') -> Dict[str, Any]:
+    def _serialize_step_result(self, step: StepResult) -> Dict[str, Any]:
         """Serialize a step result to dictionary.
         
         Args:
@@ -146,12 +159,18 @@ class JSONReporter:
             "status": "passed" if step.passed else "failed",
             "timestamp": step.timestamp.isoformat(),
             "error": step.error,
+            "action_type": step.action_type,
+            "action_summary": step.action_summary,
+            "planner_reasoning": step.planner_reasoning,
+            "page_url": step.page_url,
+            "observation_excerpt": step.observation_excerpt,
+            "artifact_paths": step.artifact_paths,
             "assertions": [
                 self._serialize_assertion_result(assertion) for assertion in step.assertions
             ]
         }
     
-    def _serialize_goal_evaluation_result(self, result: 'GoalEvaluationResult') -> Dict[str, Any]:
+    def _serialize_goal_evaluation_result(self, result: GoalEvaluationResult) -> Dict[str, Any]:
         """Serialize a goal evaluation result to dictionary.
         
         Args:
@@ -179,7 +198,7 @@ class JSONReporter:
                 "timestamp": result.timestamp.isoformat()
             }
     
-    def _serialize_assertion_result(self, assertion: 'AssertionResult') -> Dict[str, Any]:
+    def _serialize_assertion_result(self, assertion: AssertionResult) -> Dict[str, Any]:
         """Serialize an assertion result to dictionary.
         
         Args:
@@ -196,7 +215,7 @@ class JSONReporter:
             "error_message": assertion.error_message,
         }
     
-    def _get_fastest_scenario(self, scenarios: list) -> Dict[str, Any]:
+    def _get_fastest_scenario(self, scenarios: list[ScenarioReport]) -> Dict[str, Any]:
         """Get information about the fastest scenario.
         
         Args:
@@ -215,7 +234,7 @@ class JSONReporter:
             "duration_seconds": fastest.duration_seconds,
         }
     
-    def _get_slowest_scenario(self, scenarios: list) -> Dict[str, Any]:
+    def _get_slowest_scenario(self, scenarios: list[ScenarioReport]) -> Dict[str, Any]:
         """Get information about the slowest scenario.
         
         Args:
@@ -246,6 +265,14 @@ class JSONReporter:
         
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=self.indent, ensure_ascii=False, default=str)
+
+    def _serialize_model(self, model: Any) -> Any:
+        """Serialize nested Pydantic models when present."""
+        if model is None:
+            return None
+        if hasattr(model, "model_dump"):
+            return model.model_dump(mode="json")
+        return model
     
     def to_json_string(self, report: Union[ScenarioReport, TestSuiteReport]) -> str:
         """Convert report to JSON string.
