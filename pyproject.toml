@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "replicantx"
-version = "0.1.10"
+version = "0.1.11"
 description = "End-to-end testing harness for AI agents via web service API"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -73,6 +73,10 @@ Issues = "https://github.com/helixtechnologies/replicantx/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["replicantx*"]
+
+# Ship prompt templates (browser planner YAML, etc.) inside wheels/sdists.
+[tool.setuptools.package-data]
+"replicantx.prompts" = ["*.yaml", "*.yml"]
 
 [tool.black]
 line-length = 88

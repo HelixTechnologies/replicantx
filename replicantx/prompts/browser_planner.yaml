@@ -2,6 +2,7 @@
 #
 # Rendered at runtime by replicantx.prompts.load_prompt().
 # Uses Python string.Template syntax: $variable or ${variable}.
+# Note: could be made more generic in future.
 #
 # Available variables:
 #   goal              – the replicant's goal text

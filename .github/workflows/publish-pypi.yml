@@ -1,0 +1,45 @@
+# Publish wheels and sdists to PyPI when a GitHub Release is published.
+#
+# One-time: Trusted Publishing (no PYPI_API_TOKEN in GitHub)
+# ------------------------------------------------------------
+# Existing project (you already own "replicantx" on PyPI):
+#   https://pypi.org/manage/project/replicantx/settings/publishing/
+#   - Publisher: GitHub
+#   - Owner: GitHub org or user (e.g. helixtechnologies)
+#   - Repository: replicantx
+#   - Workflow filename: publish-pypi.yml
+#   - Environment name: leave blank (matches this workflow), OR set "pypi" here
+#     and add `environment: { name: pypi }` to the job below after creating
+#     that environment under Repo → Settings → Environments.
+#
+# New project (first upload creates the project):
+#   https://pypi.org/manage/account/publishing/
+#
+# After switching: remove any PYPI_API_TOKEN secret from the repo and revoke
+# unused API tokens at https://pypi.org/manage/account/token/
+#
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build
+        run: pip install build
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
