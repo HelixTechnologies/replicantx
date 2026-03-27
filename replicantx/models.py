@@ -208,6 +208,10 @@ class BrowserConfig(BaseModel):
         None,
         description="PydanticAI model for the browser planner agent (e.g., 'openai:gpt-5.2'). Uses screenshot + DOM to decide actions. Falls back to main LLM model if not specified."
     )
+    planner_model_settings: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Extra PydanticAI model_settings for the planner agent (e.g., google_thinking_config). Merged on top of built-in defaults."
+    )
 
     # Evidence for goal evaluation
     goal_evidence: GoalEvidenceMode = Field(GoalEvidenceMode.DOM, description="Evidence type for goal evaluation")

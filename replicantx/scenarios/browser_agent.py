@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models import infer_model
 
+from replicantx.prompts import load_prompt
 from replicantx.models import (
     ScenarioConfig,
     ScenarioReport,
@@ -302,11 +303,15 @@ class BrowserScenarioRunner:
             )
             model = infer_model(model_name)
 
+            planner_settings: dict = {"max_tokens": 1000, "reasoning_effort": "medium"}
+            if self.browser_config.planner_model_settings:
+                planner_settings.update(self.browser_config.planner_model_settings)
+
             agent: Agent[None, PlannedAction] = Agent(
                 model=model,
                 output_type=PlannedAction,
                 instructions=system_prompt,
-                model_settings={"max_tokens": 1000},
+                model_settings=planner_settings,
             )
 
             if self.verbose:
@@ -382,64 +387,21 @@ class BrowserScenarioRunner:
             return None
 
     def _build_planner_system_prompt(self, initial_message_sent: bool) -> str:
-        facts_str = json.dumps(self.replicant_config.facts, indent=2)
-        current_date = datetime.now().strftime("%A, %B %d, %Y")
-
-        lines = [
-            f"You are a browser automation agent. Your goal: {self.replicant_config.goal}",
-            "",
-            f"Today's date: {current_date}",
-            "",
-            f"Facts you know:\n{facts_str}",
-            "",
-            self.replicant_config.system_prompt,
-            "",
-            "You will receive a screenshot of the current page and a list of interactive elements.",
-            "Choose ONE action per turn. Available action types:",
-            "",
-            "  click   — click an element (set target to the element ID number)",
-            "  fill    — clear a field and type text (set target to element ID, value to the text)",
-            "  send_chat — type a message in the chat input and press Enter (set value to the message)",
-            "  compose_chat — type a message in the chat input WITHOUT submitting (set value to the text).",
-            "    Use this when you need to trigger a dropdown, @mention, or autocomplete before sending.",
-            "    After compose_chat, interact with the dropdown (click an option) then use submit_chat.",
-            "  submit_chat — submit the current chat draft (no value needed). Prefers a visible send button, falls back to Enter.",
-            "  press   — press a keyboard key (set value to the key, e.g. 'Enter', 'Escape', 'Tab')",
-            "  wait    — wait for the page to update (no parameters needed)",
-            "  scroll  — scroll the page (set value to 'up' or 'down')",
-            "  navigate — go to a URL (set url to the destination)",
-            "",
-            "Important rules:",
-            "- Look at the SCREENSHOT to understand what the page shows.",
-            "- If you see a form (login, onboarding, profile, etc.), fill it out step by step.",
-            "- If the page has a chat interface and you're ready to chat, use send_chat for simple messages.",
-            "- STAGED CHAT: If your message includes @mentions, slash commands, or triggers an autocomplete/dropdown,",
-            "  use compose_chat first to type the text (which will open the dropdown), then click the correct",
-            "  dropdown option, and finally use submit_chat to send.",
-            "- Don't repeat the same failing action — try something different.",
-            "- For fill actions, use the element ID from the elements list.",
-            "- For click actions, use the element ID from the elements list.",
-            "- DROPDOWNS / SELECT BOXES: For dropdown or type-ahead select fields (like category, country, currency),",
-            "  use the 'fill' action with the dropdown's element ID and the desired value.",
-            "  The fill action will first try the dropdown trigger button / combobox chevron and select the matching option.",
-            "  Do NOT rely on free-typing alone when a small dropdown button is visible.",
-            "- If the last action failed because a DOM target went stale, stop trusting the old element reference.",
-            "  Re-orient on the latest screenshot and only use element IDs that appear in the current elements list.",
-            "- If a recent failure says an overlay, drawer, or modal intercepted pointer events,",
-            "  the screen is blocked by an open panel. Close it or interact inside the open panel instead of retrying the blocked click.",
-            "- If an element already shows the value you want in its 'value=' hint, do not fill it again; move to the next required field or submit action.",
-            "- If a field visibly already shows the right value (for example, the month already shows 'Jan'), treat it as complete even if a previous fill action reported failure.",
-            "- If a dropdown option is visible in the elements list (role='option'), you can click it directly.",
-        ]
-
+        initial_msg_block = ""
         if not initial_message_sent and self.replicant_config.initial_message:
-            lines.extend([
-                "",
-                "When you reach a chat interface, your first message should be:",
-                f'  "{self.replicant_config.initial_message}"',
-            ])
+            initial_msg_block = (
+                "\n\nWhen you reach a chat interface, your first message should be:\n"
+                f'  "{self.replicant_config.initial_message}"'
+            )
 
-        return "\n".join(lines)
+        return load_prompt(
+            "browser_planner",
+            goal=self.replicant_config.goal,
+            current_date=datetime.now().strftime("%A, %B %d, %Y"),
+            facts=json.dumps(self.replicant_config.facts, indent=2),
+            persona_prompt=self.replicant_config.system_prompt,
+            initial_message_instruction=initial_msg_block,
+        )
 
     def _build_planner_user_message(
         self, planner_feedback: Optional[str] = None
