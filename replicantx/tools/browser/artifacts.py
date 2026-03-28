@@ -164,6 +164,21 @@ class ArtifactManager:
         self.failed = True
         return await self.capture_screenshot(page, name=f"failure_step_{step_index}", force=True)
 
+    async def capture_final_screenshot(self, page: Page) -> Optional[str]:
+        """
+        Capture the definitive end-of-run screenshot.
+
+        Always written to ``screenshots/final.png`` so callers can rely on a
+        stable, predictable path regardless of how the scenario ended.
+
+        Args:
+            page: Playwright page object
+
+        Returns:
+            Path to the screenshot file, or None if capture failed
+        """
+        return await self.capture_screenshot(page, name="final", force=True)
+
     def get_artifact_summary(self) -> dict:
         """
         Get a summary of artifacts generated.
@@ -179,7 +194,12 @@ class ArtifactManager:
         if self.trace_path.exists():
             summary["trace"] = str(self.trace_path)
 
-        # List screenshots
+        # Stable final screenshot (always present when browser ran)
+        final_screenshot = self.screenshot_dir / "final.png"
+        if final_screenshot.exists():
+            summary["final_screenshot"] = str(final_screenshot)
+
+        # List all screenshots
         screenshots = list(self.screenshot_dir.glob("*.png"))
         if screenshots:
             summary["screenshots"] = [str(s) for s in sorted(screenshots)]

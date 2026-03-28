@@ -239,6 +239,23 @@ class BrowserScenarioRunner:
                 traceback.print_exc()
 
         finally:
+            # Capture the definitive end-of-run screenshot before the browser
+            # closes.  Always captured so downstream consumers (issue reporting,
+            # CI summaries) get a stable ``final_screenshot`` key regardless of
+            # whether the scenario passed, hit max turns, detected a stuck loop,
+            # or raised an exception.
+            if self.browser_driver and self.artifact_manager:
+                page = self.browser_driver.get_page()
+                if page:
+                    await self.artifact_manager.capture_final_screenshot(page)
+
+            # Propagate the scenario-level outcome to the artifact manager so
+            # that RETAIN_ON_FAILURE trace mode correctly keeps the trace for
+            # stuck-loop / max-turns / exception exits (not just per-step
+            # action failures).
+            if self.artifact_manager and not passed:
+                self.artifact_manager.mark_failed()
+
             if self.browser_driver:
                 await self.browser_driver.stop()
             if self.artifact_manager:
