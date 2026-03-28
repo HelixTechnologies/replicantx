@@ -57,13 +57,18 @@ class BrowserAutomationDriver:
             headless=self.config.headless,
         )
 
-        # Create context with viewport
-        self.context = await self.browser.new_context(
-            viewport={
-                "width": self.config.viewport.width,
-                "height": self.config.viewport.height,
-            },
-        )
+        # Create context with viewport (optional Cloudflare / preview bypass headers, etc.)
+        viewport = {
+            "width": self.config.viewport.width,
+            "height": self.config.viewport.height,
+        }
+        if self.config.extra_headers:
+            self.context = await self.browser.new_context(
+                viewport=viewport,
+                extra_http_headers=self.config.extra_headers,
+            )
+        else:
+            self.context = await self.browser.new_context(viewport=viewport)
 
         # Start tracing if configured
         await self.artifact_manager.start_tracing(self.context)

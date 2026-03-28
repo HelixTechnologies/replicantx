@@ -5,11 +5,12 @@ Supabase magic link authentication provider for ReplicantX.
 """
 
 import uuid
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from playwright.async_api import BrowserContext
 
 from replicantx.auth.base import AuthBase
+from replicantx.models import AuthConfig
 
 
 class SupabaseMagicLinkAuth(AuthBase):
@@ -21,7 +22,7 @@ class SupabaseMagicLinkAuth(AuthBase):
     auth headers (for API mode).
     """
 
-    def __init__(self, config):
+    def __init__(self, config: AuthConfig):
         """
         Initialize the Supabase magic link auth provider.
 
@@ -32,8 +33,11 @@ class SupabaseMagicLinkAuth(AuthBase):
             email: Email address (required if user_mode='fixed')
             redirect_to: Optional redirect URL for magic link
             app_refresh_endpoint: App endpoint to set httpOnly cookies
+            headers: Optional extra HTTP headers (e.g. CI bypass for app refresh)
         """
         import supabase
+
+        super().__init__(config)
 
         self.project_url = config.project_url
         self.service_role_key = config.service_role_key
@@ -45,7 +49,6 @@ class SupabaseMagicLinkAuth(AuthBase):
         # Initialize Supabase client with service role key
         self.client = supabase.Client(self.project_url, self.service_role_key)
 
-        self._token = None
         self._browser_context = None
         self._generated_email = None
 
@@ -97,12 +100,16 @@ class SupabaseMagicLinkAuth(AuthBase):
             # refresh endpoint — Set-Cookie headers update the browser
             # context cookie jar automatically (Playwright feature).
             request_context = self._browser_context.request
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            }
+            if self.config.headers:
+                headers.update(self.config.headers)
+
             response = await request_context.post(
                 self.app_refresh_endpoint,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {access_token}",
-                },
+                headers=headers,
                 data={
                     "refresh_token": refresh_token,
                 },
@@ -169,20 +176,20 @@ class SupabaseMagicLinkAuth(AuthBase):
 
         return auth_resp.session.access_token, auth_resp.session.refresh_token
 
-    def get_headers(self) -> dict:
+    async def get_headers(self) -> Dict[str, str]:
         """
         Get authentication headers for API requests.
 
         Returns:
             Dictionary of headers
         """
-        headers = {
+        token = await self.token()
+        headers: Dict[str, str] = {
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
         }
-
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-
+        if self.config.headers:
+            headers.update(self.config.headers)
         return headers
 
     def set_browser_context(self, context: BrowserContext):
@@ -199,6 +206,6 @@ class SupabaseMagicLinkAuth(AuthBase):
         """Get the generated email (if user_mode='generated')."""
         return self._generated_email
 
-    def invalidate_token(self):
+    def invalidate_token(self) -> None:
         """Invalidate the cached token."""
-        self._token = None
+        super().invalidate_token()

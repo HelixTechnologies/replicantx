@@ -228,6 +228,11 @@ class BrowserConfig(BaseModel):
         description="Allowed domains for navigation (empty = no restriction)"
     )
 
+    extra_headers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional HTTP headers to send with every browser request",
+    )
+
     # Artifacts
     trace: TraceMode = Field(TraceMode.RETAIN_ON_FAILURE, description="Playwright trace recording mode")
 
