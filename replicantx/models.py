@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class AuthProvider(str, Enum):
     """Supported authentication providers."""
+
     SUPABASE = "supabase"
     SUPABASE_MAGIC_LINK = "supabase_magic_link"
     JWT = "jwt"
@@ -21,12 +22,14 @@ class AuthProvider(str, Enum):
 
 class TestLevel(str, Enum):
     """Test scenario levels."""
+
     BASIC = "basic"
     AGENT = "agent"
 
 
 class AssertionType(str, Enum):
     """Types of assertions that can be made."""
+
     CONTAINS = "contains"
     REGEX = "regex"
     EQUALS = "equals"
@@ -35,6 +38,7 @@ class AssertionType(str, Enum):
 
 class PayloadFormat(str, Enum):
     """Supported API payload formats."""
+
     OPENAI = "openai"  # OpenAI chat completion format
     SIMPLE = "simple"  # Simple message-only format
     ANTHROPIC = "anthropic"  # Anthropic Claude format
@@ -47,6 +51,7 @@ class PayloadFormat(str, Enum):
 
 class SessionMode(str, Enum):
     """Session management modes."""
+
     DISABLED = "disabled"  # No session management (legacy behavior)
     AUTO = "auto"  # Auto-generate session ID
     FIXED = "fixed"  # Use fixed session ID from config
@@ -55,12 +60,14 @@ class SessionMode(str, Enum):
 
 class SessionFormat(str, Enum):
     """Session ID generation formats."""
+
     REPLICANTX = "replicantx"  # replicantx_xxxxxxxx format
     UUID = "uuid"  # Standard UUID format
 
 
 class SessionPlacement(str, Enum):
     """Where to place the session ID."""
+
     HEADER = "header"  # In HTTP headers
     BODY = "body"  # In request body/payload
     URL = "url"  # In URL path (RESTful)
@@ -68,6 +75,7 @@ class SessionPlacement(str, Enum):
 
 class GoalEvaluationMode(str, Enum):
     """Goal evaluation modes."""
+
     KEYWORDS = "keywords"  # Simple keyword matching (legacy behavior)
     INTELLIGENT = "intelligent"  # LLM-based goal evaluation
     HYBRID = "hybrid"  # LLM with keyword fallback
@@ -75,12 +83,14 @@ class GoalEvaluationMode(str, Enum):
 
 class InteractionMode(str, Enum):
     """Interaction mode for agent scenarios."""
+
     API = "api"  # HTTP API mode (default)
     BROWSER = "browser"  # Browser automation mode with Playwright
 
 
 class GoalEvidenceMode(str, Enum):
     """Evidence types for goal evaluation in browser mode."""
+
     DOM = "dom"  # DOM-based evidence (default)
     SCREENSHOT = "screenshot"  # Screenshot-based evidence
     DOM_THEN_SCREENSHOT = "dom_then_screenshot"  # Try DOM first, fallback to screenshot
@@ -89,13 +99,24 @@ class GoalEvidenceMode(str, Enum):
 
 class TraceMode(str, Enum):
     """Playwright trace recording mode."""
+
     OFF = "off"  # No tracing
     RETAIN_ON_FAILURE = "retain-on-failure"  # Keep trace only on failure
     ON = "on"  # Always keep trace
 
 
+class PageSettleStrategy(str, Enum):
+    """How strictly to wait for the page to settle after initial navigation."""
+
+    DOM_CONTENT_LOADED = "domcontentloaded"
+    LOAD = "load"
+    NETWORK_IDLE = "networkidle"
+    BEST_EFFORT = "best_effort"
+
+
 class IssueMode(str, Enum):
     """How ReplicantX should handle issue processing."""
+
     OFF = "off"
     AUTO_HIGH_CONFIDENCE = "auto-high-confidence"
     DRAFT_ONLY = "draft-only"
@@ -103,12 +124,14 @@ class IssueMode(str, Enum):
 
 class IssueArtifactUploadMode(str, Enum):
     """Whether issue artifacts should be uploaded."""
+
     OFF = "off"
     ON = "on"
 
 
 class IssueDecision(str, Enum):
     """Classifier output for a browser issue candidate."""
+
     AUTO_FILE = "auto_file"
     REVIEW = "review"
     SKIP = "skip"
@@ -116,14 +139,20 @@ class IssueDecision(str, Enum):
 
 class LLMConfig(BaseModel):
     """Configuration for LLM using PydanticAI models."""
+
     model_config = ConfigDict(extra="forbid")
-    
-    model: str = Field("test", description="PydanticAI model name (e.g., 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet-latest', 'test')")
-    temperature: Optional[float] = Field(None, description="Temperature for response generation")
+
+    model: str = Field(
+        "test",
+        description="PydanticAI model name (e.g., 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet-latest', 'test')",
+    )
+    temperature: Optional[float] = Field(
+        None, description="Temperature for response generation"
+    )
     max_tokens: Optional[int] = Field(None, description="Maximum tokens for response")
-    
-    @model_validator(mode='after')
-    def validate_llm_config(self) -> 'LLMConfig':
+
+    @model_validator(mode="after")
+    def validate_llm_config(self) -> "LLMConfig":
         """Validate LLM configuration."""
         # PydanticAI handles model validation internally
         return self
@@ -131,26 +160,37 @@ class LLMConfig(BaseModel):
 
 class Message(BaseModel):
     """A message exchanged between user and AI agent."""
+
     model_config = ConfigDict(extra="forbid")
 
     role: str = Field(..., description="Role of the message sender (user/assistant)")
     content: str = Field(..., description="Content of the message")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When message was sent")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When message was sent"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata"
+    )
 
 
 # Browser mode models
 
+
 class InteractiveElement(BaseModel):
     """An interactive element on a web page."""
+
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(..., description="Stable element ID for the current turn")
-    role: str = Field(..., description="Element role (button, link, textbox, menuitem, etc.)")
+    role: str = Field(
+        ..., description="Element role (button, link, textbox, menuitem, etc.)"
+    )
     name: str = Field(..., description="Best-effort accessible name or inner text")
     tag_name: str = Field("", description="HTML tag name (e.g., INPUT, BUTTON, A)")
     placeholder: Optional[str] = Field(None, description="Placeholder text if present")
-    current_value: Optional[str] = Field(None, description="Current visible value if readable")
+    current_value: Optional[str] = Field(
+        None, description="Current visible value if readable"
+    )
     is_typeahead: bool = Field(
         False,
         description="Whether the control appears to behave like a combobox/type-ahead",
@@ -163,25 +203,30 @@ class InteractiveElement(BaseModel):
         False,
         description="Whether the field is marked as required (required attribute, aria-required, or a * label indicator)",
     )
-    locator: Optional[str] = Field(None, description="Playwright locator strategy (internal use)")
+    locator: Optional[str] = Field(
+        None, description="Playwright locator strategy (internal use)"
+    )
 
 
 class BrowserObservation(BaseModel):
     """A compact, LLM-friendly snapshot of a web page."""
+
     model_config = ConfigDict(extra="forbid")
 
     url: str = Field(..., description="Current page URL")
     title: str = Field(..., description="Page title")
     visible_text: str = Field(..., description="Sanitized and truncated visible text")
     interactive_elements: List[InteractiveElement] = Field(
-        default_factory=list,
-        description="List of interactive elements (capped)"
+        default_factory=list, description="List of interactive elements (capped)"
     )
-    timestamp: datetime = Field(default_factory=datetime.now, description="When observation was captured")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When observation was captured"
+    )
 
 
 class ViewportConfig(BaseModel):
     """Browser viewport configuration."""
+
     model_config = ConfigDict(extra="forbid")
 
     width: int = Field(1400, description="Viewport width in pixels")
@@ -190,42 +235,68 @@ class ViewportConfig(BaseModel):
 
 class BrowserConfig(BaseModel):
     """Configuration for browser mode automation."""
+
     model_config = ConfigDict(extra="forbid")
 
     start_url: str = Field(..., description="Initial URL to navigate to")
     headless: bool = Field(True, description="Whether to run browser in headless mode")
-    browser_type: str = Field("chromium", description="Browser type: chromium, firefox, or webkit")
-    viewport: ViewportConfig = Field(default_factory=ViewportConfig, description="Browser viewport dimensions")
-    navigation_timeout_seconds: int = Field(30, description="Timeout for page navigation")
-    action_timeout_seconds: int = Field(15, description="Timeout for individual actions")
+    browser_type: str = Field(
+        "chromium", description="Browser type: chromium, firefox, or webkit"
+    )
+    viewport: ViewportConfig = Field(
+        default_factory=ViewportConfig, description="Browser viewport dimensions"
+    )
+    navigation_timeout_seconds: int = Field(
+        30, description="Timeout for page navigation"
+    )
+    action_timeout_seconds: int = Field(
+        15, description="Timeout for individual actions"
+    )
+    page_settle_strategy: PageSettleStrategy = Field(
+        PageSettleStrategy.BEST_EFFORT,
+        description=(
+            "After start_url navigation: domcontentloaded (minimal), load, strict networkidle, "
+            "or best_effort (load then optional networkidle; continues if network never idles)"
+        ),
+    )
 
     # Observation controls
-    max_interactive_elements: int = Field(40, description="Maximum interactive elements to extract")
-    max_visible_text_chars: int = Field(6000, description="Maximum visible text characters to extract")
+    max_interactive_elements: int = Field(
+        40, description="Maximum interactive elements to extract"
+    )
+    max_visible_text_chars: int = Field(
+        6000, description="Maximum visible text characters to extract"
+    )
 
     # Planner model (decides what action to take each turn)
     planner_model: Optional[str] = Field(
         None,
-        description="PydanticAI model for the browser planner agent (e.g., 'openai:gpt-5.2'). Uses screenshot + DOM to decide actions. Falls back to main LLM model if not specified."
+        description="PydanticAI model for the browser planner agent (e.g., 'openai:gpt-5.2'). Uses screenshot + DOM to decide actions. Falls back to main LLM model if not specified.",
     )
     planner_model_settings: Optional[Dict[str, Any]] = Field(
         None,
-        description="Extra PydanticAI model_settings for the planner agent (e.g., google_thinking_config). Merged on top of built-in defaults."
+        description="Extra PydanticAI model_settings for the planner agent (e.g., google_thinking_config). Merged on top of built-in defaults.",
     )
 
     # Evidence for goal evaluation
-    goal_evidence: GoalEvidenceMode = Field(GoalEvidenceMode.DOM, description="Evidence type for goal evaluation")
+    goal_evidence: GoalEvidenceMode = Field(
+        GoalEvidenceMode.DOM, description="Evidence type for goal evaluation"
+    )
     screenshot_evaluation_model: Optional[str] = Field(
         None,
-        description="PydanticAI model for screenshot-based goal evaluation (e.g., 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet-latest'). If not specified, uses goal_evaluation_model or main LLM model."
+        description="PydanticAI model for screenshot-based goal evaluation (e.g., 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet-latest'). If not specified, uses goal_evaluation_model or main LLM model.",
     )
-    screenshot_on_each_turn: bool = Field(False, description="Whether to capture screenshot each turn")
-    screenshot_on_failure: bool = Field(True, description="Whether to capture screenshot on failure")
+    screenshot_on_each_turn: bool = Field(
+        False, description="Whether to capture screenshot each turn"
+    )
+    screenshot_on_failure: bool = Field(
+        True, description="Whether to capture screenshot on failure"
+    )
 
     # Safety
     domain_allowlist: List[str] = Field(
         default_factory=list,
-        description="Allowed domains for navigation (empty = no restriction)"
+        description="Allowed domains for navigation (empty = no restriction)",
     )
 
     extra_headers: Dict[str, str] = Field(
@@ -234,37 +305,57 @@ class BrowserConfig(BaseModel):
     )
 
     # Artifacts
-    trace: TraceMode = Field(TraceMode.RETAIN_ON_FAILURE, description="Playwright trace recording mode")
+    trace: TraceMode = Field(
+        TraceMode.RETAIN_ON_FAILURE, description="Playwright trace recording mode"
+    )
 
 
 class BrowserAction(BaseModel):
     """An action to perform in the browser."""
+
     model_config = ConfigDict(extra="forbid")
 
-    action_type: str = Field(..., description="Type of action: send_chat, compose_chat, submit_chat, click, fill, press, wait, scroll, navigate")
-    target: Optional[str] = Field(None, description="Target element ID (for click, fill)")
-    value: Optional[str] = Field(None, description="Value to set (for fill, send_chat, compose_chat)")
-    direction: Optional[str] = Field(None, description="Direction for scroll: up or down")
+    action_type: str = Field(
+        ...,
+        description="Type of action: send_chat, compose_chat, submit_chat, click, fill, press, wait, scroll, navigate",
+    )
+    target: Optional[str] = Field(
+        None, description="Target element ID (for click, fill)"
+    )
+    value: Optional[str] = Field(
+        None, description="Value to set (for fill, send_chat, compose_chat)"
+    )
+    direction: Optional[str] = Field(
+        None, description="Direction for scroll: up or down"
+    )
     amount: Optional[int] = Field(None, description="Amount to scroll in pixels")
-    duration_ms: Optional[int] = Field(None, description="Wait duration in milliseconds")
+    duration_ms: Optional[int] = Field(
+        None, description="Wait duration in milliseconds"
+    )
     url: Optional[str] = Field(None, description="URL to navigate to")
 
 
 class BrowserActionResult(BaseModel):
     """Result of executing a browser action."""
+
     model_config = ConfigDict(extra="forbid")
 
     action: BrowserAction = Field(..., description="The action that was executed")
     success: bool = Field(..., description="Whether the action succeeded")
     message: str = Field(..., description="Human-readable result message")
-    observation: Optional[BrowserObservation] = Field(None, description="Page observation after action")
-    screenshot_path: Optional[str] = Field(None, description="Path to screenshot if captured")
+    observation: Optional[BrowserObservation] = Field(
+        None, description="Page observation after action"
+    )
+    screenshot_path: Optional[str] = Field(
+        None, description="Path to screenshot if captured"
+    )
     error: Optional[str] = Field(None, description="Error message if action failed")
     latency_ms: float = Field(..., description="Action execution time in milliseconds")
 
 
 class BrowserNetworkEvent(BaseModel):
     """Normalized Playwright network event for diagnostics."""
+
     model_config = ConfigDict(extra="forbid")
 
     event_type: str = Field(..., description="response or requestfailed")
@@ -273,12 +364,17 @@ class BrowserNetworkEvent(BaseModel):
     resource_type: Optional[str] = Field(None, description="Playwright resource type")
     status_code: Optional[int] = Field(None, description="HTTP response status code")
     failure_text: Optional[str] = Field(None, description="Request failure text")
-    is_first_party: bool = Field(False, description="Whether the URL belongs to the app under test")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When the event was observed")
+    is_first_party: bool = Field(
+        False, description="Whether the URL belongs to the app under test"
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When the event was observed"
+    )
 
 
 class BrowserConsoleEvent(BaseModel):
     """Normalized browser console event."""
+
     model_config = ConfigDict(extra="forbid")
 
     level: str = Field(..., description="Console severity level")
@@ -286,22 +382,32 @@ class BrowserConsoleEvent(BaseModel):
     source_url: Optional[str] = Field(None, description="Originating script URL")
     line_number: Optional[int] = Field(None, description="Source line number")
     column_number: Optional[int] = Field(None, description="Source column number")
-    is_first_party: bool = Field(False, description="Whether the source belongs to the app under test")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When the event was observed")
+    is_first_party: bool = Field(
+        False, description="Whether the source belongs to the app under test"
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When the event was observed"
+    )
 
 
 class BrowserPageErrorEvent(BaseModel):
     """Unhandled page error surfaced by Playwright."""
+
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(..., description="Page error message")
     stack: Optional[str] = Field(None, description="Stack trace if available")
-    is_first_party: bool = Field(True, description="Whether the source belongs to the app under test")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When the error was observed")
+    is_first_party: bool = Field(
+        True, description="Whether the source belongs to the app under test"
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When the error was observed"
+    )
 
 
 class BrowserWebSocketEvent(BaseModel):
     """Normalized websocket lifecycle event."""
+
     model_config = ConfigDict(extra="forbid")
 
     event_type: str = Field(
@@ -329,6 +435,7 @@ class BrowserWebSocketEvent(BaseModel):
 
 class BrowserIdentityContext(BaseModel):
     """Correlation identifiers extracted from the browser session."""
+
     model_config = ConfigDict(extra="forbid")
 
     user_id: Optional[str] = Field(None, description="Authenticated user ID")
@@ -345,6 +452,7 @@ class BrowserIdentityContext(BaseModel):
 
 class BrowserTurnDiagnostic(BaseModel):
     """Per-turn diagnostics for browser scenarios."""
+
     model_config = ConfigDict(extra="forbid")
 
     turn_index: int = Field(..., description="Turn index in the browser loop")
@@ -354,9 +462,13 @@ class BrowserTurnDiagnostic(BaseModel):
         description="Browser action chosen for this turn",
     )
     page_url_before: Optional[str] = Field(None, description="URL before the action")
-    page_title_before: Optional[str] = Field(None, description="Page title before the action")
+    page_title_before: Optional[str] = Field(
+        None, description="Page title before the action"
+    )
     page_url_after: Optional[str] = Field(None, description="URL after the action")
-    page_title_after: Optional[str] = Field(None, description="Page title after the action")
+    page_title_after: Optional[str] = Field(
+        None, description="Page title after the action"
+    )
     action_success: bool = Field(..., description="Whether the action succeeded")
     action_message: str = Field(..., description="Human-readable action outcome")
     error: Optional[str] = Field(None, description="Action or turn error")
@@ -388,15 +500,20 @@ class BrowserTurnDiagnostic(BaseModel):
 
 class BrowserScenarioDiagnostics(BaseModel):
     """Structured diagnostics captured during browser execution."""
+
     model_config = ConfigDict(extra="forbid")
 
     scenario_name: str = Field(..., description="Scenario name")
     goal: str = Field(..., description="Replicant goal")
     start_url: str = Field(..., description="Scenario start URL")
     started_at: datetime = Field(..., description="When browser execution started")
-    completed_at: Optional[datetime] = Field(None, description="When browser execution completed")
+    completed_at: Optional[datetime] = Field(
+        None, description="When browser execution completed"
+    )
     environment: Optional[str] = Field(None, description="Execution environment label")
-    artifact_dir: Optional[str] = Field(None, description="Artifact directory for the scenario")
+    artifact_dir: Optional[str] = Field(
+        None, description="Artifact directory for the scenario"
+    )
     trace_path: Optional[str] = Field(None, description="Trace path if captured")
     identity: BrowserIdentityContext = Field(
         default_factory=BrowserIdentityContext,
@@ -426,6 +543,7 @@ class BrowserScenarioDiagnostics(BaseModel):
 
 class LogfireRecord(BaseModel):
     """A compact Logfire record excerpt."""
+
     model_config = ConfigDict(extra="forbid")
 
     timestamp: str = Field(..., description="Record timestamp")
@@ -441,13 +559,20 @@ class LogfireRecord(BaseModel):
 
 class LogfireExcerpt(BaseModel):
     """Query metadata and compact results from Logfire."""
+
     model_config = ConfigDict(extra="forbid")
 
-    query_window_start: Optional[str] = Field(None, description="Start of the query window")
+    query_window_start: Optional[str] = Field(
+        None, description="Start of the query window"
+    )
     query_window_end: Optional[str] = Field(None, description="End of the query window")
-    query_sql: Optional[str] = Field(None, description="Rendered SQL used for the query")
+    query_sql: Optional[str] = Field(
+        None, description="Rendered SQL used for the query"
+    )
     fetched: bool = Field(False, description="Whether the query succeeded")
-    unavailable_reason: Optional[str] = Field(None, description="Why logs are unavailable")
+    unavailable_reason: Optional[str] = Field(
+        None, description="Why logs are unavailable"
+    )
     records: List[LogfireRecord] = Field(
         default_factory=list,
         description="Compact Logfire records",
@@ -456,6 +581,7 @@ class LogfireExcerpt(BaseModel):
 
 class IssueArtifactLink(BaseModel):
     """Artifact metadata for issue generation."""
+
     model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(..., description="Artifact type such as screenshot or trace")
@@ -466,6 +592,7 @@ class IssueArtifactLink(BaseModel):
 
 class IssueClassification(BaseModel):
     """Classifier output for a browser issue candidate."""
+
     model_config = ConfigDict(extra="forbid")
 
     decision: IssueDecision = Field(..., description="Classifier decision")
@@ -488,6 +615,7 @@ class IssueClassification(BaseModel):
 
 class IssueBundle(BaseModel):
     """Standalone issue bundle written to disk for browser scenarios."""
+
     model_config = ConfigDict(extra="forbid")
 
     scenario_name: str = Field(..., description="Scenario name")
@@ -495,11 +623,15 @@ class IssueBundle(BaseModel):
     repo_target: str = Field(..., description="Repository to file against")
     goal: str = Field(..., description="Replicant goal")
     environment: Optional[str] = Field(None, description="Execution environment label")
-    generated_at: datetime = Field(default_factory=datetime.now, description="When the bundle was generated")
+    generated_at: datetime = Field(
+        default_factory=datetime.now, description="When the bundle was generated"
+    )
     scenario_passed: bool = Field(..., description="Whether the scenario passed")
     scenario_error: Optional[str] = Field(None, description="Top-level scenario error")
     classification: IssueClassification = Field(..., description="Classifier output")
-    diagnostics: BrowserScenarioDiagnostics = Field(..., description="Browser diagnostics for the scenario")
+    diagnostics: BrowserScenarioDiagnostics = Field(
+        ..., description="Browser diagnostics for the scenario"
+    )
     artifact_links: List[IssueArtifactLink] = Field(
         default_factory=list,
         description="Artifacts referenced by the issue bundle",
@@ -514,71 +646,109 @@ class IssueBundle(BaseModel):
 
 class GoalEvaluationResult(BaseModel):
     """Result of goal evaluation."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     goal_achieved: bool = Field(..., description="Whether the goal has been achieved")
     confidence: float = Field(..., description="Confidence score from 0.0 to 1.0")
-    reasoning: str = Field(..., description="Explanation of why the goal is/isn't achieved")
-    evaluation_method: str = Field(..., description="Method used: 'keywords', 'intelligent', or 'hybrid'")
-    fallback_used: bool = Field(False, description="Whether hybrid mode fell back to keywords")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When evaluation was performed")
+    reasoning: str = Field(
+        ..., description="Explanation of why the goal is/isn't achieved"
+    )
+    evaluation_method: str = Field(
+        ..., description="Method used: 'keywords', 'intelligent', or 'hybrid'"
+    )
+    fallback_used: bool = Field(
+        False, description="Whether hybrid mode fell back to keywords"
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When evaluation was performed"
+    )
 
 
 class AssertionResult(BaseModel):
     """Result of an assertion check."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     assertion_type: AssertionType = Field(..., description="Type of assertion")
     expected: Union[str, List[str]] = Field(..., description="Expected value(s)")
     actual: str = Field(..., description="Actual response content")
     passed: bool = Field(..., description="Whether assertion passed")
-    error_message: Optional[str] = Field(None, description="Error message if assertion failed")
+    error_message: Optional[str] = Field(
+        None, description="Error message if assertion failed"
+    )
 
 
 class StepResult(BaseModel):
     """Result of executing a test step."""
+
     model_config = ConfigDict(extra="forbid")
 
     step_index: int = Field(..., description="Index of the step in the scenario")
     user_message: str = Field(..., description="User message sent")
     response: str = Field(..., description="AI agent response")
     latency_ms: float = Field(..., description="Response latency in milliseconds")
-    assertions: List[AssertionResult] = Field(default_factory=list, description="Assertion results")
+    assertions: List[AssertionResult] = Field(
+        default_factory=list, description="Assertion results"
+    )
     passed: bool = Field(..., description="Whether all assertions passed")
     error: Optional[str] = Field(None, description="Error message if step failed")
-    timestamp: datetime = Field(default_factory=datetime.now, description="When step was executed")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="When step was executed"
+    )
 
     # Browser mode specific fields (optional)
-    action_type: Optional[str] = Field(None, description="Action type in browser mode (e.g., click, send_chat, compose_chat, submit_chat)")
-    action_summary: Optional[str] = Field(None, description="Summary of browser action performed")
-    planner_reasoning: Optional[str] = Field(None, description="Planner reasoning for the chosen browser action")
-    page_url: Optional[str] = Field(None, description="Current page URL in browser mode")
-    observation_excerpt: Optional[str] = Field(None, description="Excerpt from page observation")
+    action_type: Optional[str] = Field(
+        None,
+        description="Action type in browser mode (e.g., click, send_chat, compose_chat, submit_chat)",
+    )
+    action_summary: Optional[str] = Field(
+        None, description="Summary of browser action performed"
+    )
+    planner_reasoning: Optional[str] = Field(
+        None, description="Planner reasoning for the chosen browser action"
+    )
+    page_url: Optional[str] = Field(
+        None, description="Current page URL in browser mode"
+    )
+    observation_excerpt: Optional[str] = Field(
+        None, description="Excerpt from page observation"
+    )
     artifact_paths: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Paths to artifacts (screenshot, trace, etc.)"
+        default_factory=dict, description="Paths to artifacts (screenshot, trace, etc.)"
     )
 
 
 class Step(BaseModel):
     """A single test step in a scenario."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     user: str = Field(..., description="User message to send")
-    expect_contains: Optional[List[str]] = Field(None, description="Text that must be contained in response")
-    expect_regex: Optional[str] = Field(None, description="Regex pattern that must match response")
-    expect_equals: Optional[str] = Field(None, description="Exact text that response must equal")
-    expect_not_contains: Optional[List[str]] = Field(None, description="Text that must NOT be in response")
-    timeout_seconds: Optional[int] = Field(30, description="Timeout for this step in seconds")
-    
-    @model_validator(mode='after')
-    def validate_expectations(self) -> 'Step':
+    expect_contains: Optional[List[str]] = Field(
+        None, description="Text that must be contained in response"
+    )
+    expect_regex: Optional[str] = Field(
+        None, description="Regex pattern that must match response"
+    )
+    expect_equals: Optional[str] = Field(
+        None, description="Exact text that response must equal"
+    )
+    expect_not_contains: Optional[List[str]] = Field(
+        None, description="Text that must NOT be in response"
+    )
+    timeout_seconds: Optional[int] = Field(
+        30, description="Timeout for this step in seconds"
+    )
+
+    @model_validator(mode="after")
+    def validate_expectations(self) -> "Step":
         """Validate that at least one expectation is provided."""
         expectations = [
             self.expect_contains,
-            self.expect_regex, 
+            self.expect_regex,
             self.expect_equals,
-            self.expect_not_contains
+            self.expect_not_contains,
         ]
         if not any(exp is not None for exp in expectations):
             raise ValueError("At least one expectation must be provided")
@@ -587,6 +757,7 @@ class Step(BaseModel):
 
 class AuthConfig(BaseModel):
     """Authentication configuration."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: AuthProvider = Field(..., description="Authentication provider")
@@ -596,30 +767,48 @@ class AuthConfig(BaseModel):
     project_url: Optional[str] = Field(None, description="Supabase project URL")
     api_key: Optional[str] = Field(None, description="Supabase API key")
     # Supabase magic link auth fields
-    service_role_key: Optional[str] = Field(None, description="Service role key for Supabase magic link auth")
-    user_mode: Optional[str] = Field(None, description="User mode for magic link: 'generated' or 'fixed'")
+    service_role_key: Optional[str] = Field(
+        None, description="Service role key for Supabase magic link auth"
+    )
+    user_mode: Optional[str] = Field(
+        None, description="User mode for magic link: 'generated' or 'fixed'"
+    )
     redirect_to: Optional[str] = Field(None, description="Redirect URL for magic link")
-    app_refresh_endpoint: Optional[str] = Field(None, description="App refresh endpoint for cookie setting")
+    app_refresh_endpoint: Optional[str] = Field(
+        None, description="App refresh endpoint for cookie setting"
+    )
     # JWT auth fields
     token: Optional[str] = Field(None, description="JWT token for authentication")
     # Additional headers for custom auth
-    headers: Dict[str, str] = Field(default_factory=dict, description="Additional auth headers")
+    headers: Dict[str, str] = Field(
+        default_factory=dict, description="Additional auth headers"
+    )
 
-    @model_validator(mode='after')
-    def validate_auth_config(self) -> 'AuthConfig':
+    @model_validator(mode="after")
+    def validate_auth_config(self) -> "AuthConfig":
         """Validate authentication configuration based on provider."""
         if self.provider == AuthProvider.SUPABASE:
-            required_fields = ['email', 'password', 'project_url', 'api_key']
-            missing = [field for field in required_fields if getattr(self, field) is None]
+            required_fields = ["email", "password", "project_url", "api_key"]
+            missing = [
+                field for field in required_fields if getattr(self, field) is None
+            ]
             if missing:
                 raise ValueError(f"Supabase auth requires: {missing}")
         elif self.provider == AuthProvider.SUPABASE_MAGIC_LINK:
-            required_fields = ['project_url', 'service_role_key', 'app_refresh_endpoint']
-            missing = [field for field in required_fields if getattr(self, field) is None]
+            required_fields = [
+                "project_url",
+                "service_role_key",
+                "app_refresh_endpoint",
+            ]
+            missing = [
+                field for field in required_fields if getattr(self, field) is None
+            ]
             if missing:
                 raise ValueError(f"Supabase magic link auth requires: {missing}")
-            if self.user_mode == 'fixed' and not self.email:
-                raise ValueError("Supabase magic link auth with user_mode='fixed' requires email")
+            if self.user_mode == "fixed" and not self.email:
+                raise ValueError(
+                    "Supabase magic link auth with user_mode='fixed' requires email"
+                )
         elif self.provider == AuthProvider.JWT:
             if self.token is None:
                 raise ValueError("JWT auth requires token")
@@ -628,68 +817,131 @@ class AuthConfig(BaseModel):
 
 class ReplicantConfig(BaseModel):
     """Configuration for the Replicant agent in agent-level scenarios."""
+
     model_config = ConfigDict(extra="forbid")
 
     goal: str = Field(..., description="The goal the Replicant should achieve")
-    facts: Dict[str, Any] = Field(default_factory=dict, description="Facts the Replicant knows (e.g., name, email, preferences)")
+    facts: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Facts the Replicant knows (e.g., name, email, preferences)",
+    )
     system_prompt: str = Field(
         "You are a helpful user trying to achieve a goal. You have access to certain facts but may not remember to provide all details upfront. Answer questions based on your available facts.",
-        description="System prompt for the Replicant agent"
+        description="System prompt for the Replicant agent",
     )
-    initial_message: Optional[str] = Field(None, description="Optional initial message to start the conversation. In browser mode this is a suggested first draft the planner may compose.")
+    initial_message: Optional[str] = Field(
+        None,
+        description="Optional initial message to start the conversation. In browser mode this is a suggested first draft the planner may compose.",
+    )
     max_turns: int = Field(20, description="Maximum conversation turns")
     completion_keywords: List[str] = Field(
-        default_factory=lambda: ["complete", "finished", "done", "confirmed", "thank you", "success"],
-        description="Keywords that indicate conversation completion"
+        default_factory=lambda: [
+            "complete",
+            "finished",
+            "done",
+            "confirmed",
+            "thank you",
+            "success",
+        ],
+        description="Keywords that indicate conversation completion",
     )
 
     # Interaction mode
-    interaction_mode: InteractionMode = Field(InteractionMode.API, description="Interaction mode: 'api' (default) or 'browser'")
+    interaction_mode: InteractionMode = Field(
+        InteractionMode.API,
+        description="Interaction mode: 'api' (default) or 'browser'",
+    )
 
     # API mode configuration (legacy)
-    fullconversation: bool = Field(True, description="Whether to send full conversation history (including responses) with each request (API mode only)")
-    payload_format: PayloadFormat = Field(PayloadFormat.OPENAI, description="API payload format: 'openai', 'simple', 'anthropic', 'legacy', or session-aware formats (API mode only)")
+    fullconversation: bool = Field(
+        True,
+        description="Whether to send full conversation history (including responses) with each request (API mode only)",
+    )
+    payload_format: PayloadFormat = Field(
+        PayloadFormat.OPENAI,
+        description="API payload format: 'openai', 'simple', 'anthropic', 'legacy', or session-aware formats (API mode only)",
+    )
 
     # Session management configuration (API mode only)
-    session_mode: SessionMode = Field(SessionMode.DISABLED, description="Session management mode: 'disabled', 'auto', 'fixed', or 'env' (API mode only)")
-    session_id: Optional[str] = Field(None, description="Fixed session ID (used when session_mode is 'fixed')")
-    session_timeout: int = Field(300, description="Session timeout in seconds (default: 5 minutes)")
-    session_format: SessionFormat = Field(SessionFormat.UUID, description="Session ID format: 'replicantx' or 'uuid' (default: uuid)")
-    session_placement: SessionPlacement = Field(SessionPlacement.BODY, description="Session ID placement: 'header', 'body', or 'url' (default: body)")
-    session_variable_name: str = Field("session_id", description="Name of the session variable in header/body (default: session_id)")
+    session_mode: SessionMode = Field(
+        SessionMode.DISABLED,
+        description="Session management mode: 'disabled', 'auto', 'fixed', or 'env' (API mode only)",
+    )
+    session_id: Optional[str] = Field(
+        None, description="Fixed session ID (used when session_mode is 'fixed')"
+    )
+    session_timeout: int = Field(
+        300, description="Session timeout in seconds (default: 5 minutes)"
+    )
+    session_format: SessionFormat = Field(
+        SessionFormat.UUID,
+        description="Session ID format: 'replicantx' or 'uuid' (default: uuid)",
+    )
+    session_placement: SessionPlacement = Field(
+        SessionPlacement.BODY,
+        description="Session ID placement: 'header', 'body', or 'url' (default: body)",
+    )
+    session_variable_name: str = Field(
+        "session_id",
+        description="Name of the session variable in header/body (default: session_id)",
+    )
 
     # LLM configuration
-    llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM configuration for response generation")
+    llm: LLMConfig = Field(
+        default_factory=LLMConfig,
+        description="LLM configuration for response generation",
+    )
 
     # Goal evaluation configuration
-    goal_evaluation_mode: GoalEvaluationMode = Field(GoalEvaluationMode.KEYWORDS, description="Goal evaluation mode: 'keywords' (default), 'intelligent', or 'hybrid'")
-    goal_evaluation_model: Optional[str] = Field(None, description="PydanticAI model for goal evaluation (defaults to main LLM model if not specified)")
-    goal_evaluation_prompt: Optional[str] = Field(None, description="Custom prompt for goal evaluation (uses default if not specified)")
+    goal_evaluation_mode: GoalEvaluationMode = Field(
+        GoalEvaluationMode.KEYWORDS,
+        description="Goal evaluation mode: 'keywords' (default), 'intelligent', or 'hybrid'",
+    )
+    goal_evaluation_model: Optional[str] = Field(
+        None,
+        description="PydanticAI model for goal evaluation (defaults to main LLM model if not specified)",
+    )
+    goal_evaluation_prompt: Optional[str] = Field(
+        None,
+        description="Custom prompt for goal evaluation (uses default if not specified)",
+    )
 
     # Browser mode configuration
-    browser: Optional[BrowserConfig] = Field(None, description="Browser automation configuration (browser mode only)")
+    browser: Optional[BrowserConfig] = Field(
+        None, description="Browser automation configuration (browser mode only)"
+    )
 
 
 class ScenarioConfig(BaseModel):
     """Configuration for a test scenario."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     name: str = Field(..., description="Human-readable name of the scenario")
     base_url: str = Field(..., description="Base URL for the API endpoint")
     auth: AuthConfig = Field(..., description="Authentication configuration")
     level: TestLevel = Field(..., description="Test level (basic or agent)")
     # For basic scenarios
-    steps: Optional[List[Step]] = Field(None, description="List of test steps to execute (basic level only)")
+    steps: Optional[List[Step]] = Field(
+        None, description="List of test steps to execute (basic level only)"
+    )
     # For agent scenarios
-    replicant: Optional[ReplicantConfig] = Field(None, description="Replicant agent configuration (agent level only)")
+    replicant: Optional[ReplicantConfig] = Field(
+        None, description="Replicant agent configuration (agent level only)"
+    )
     timeout_seconds: int = Field(120, description="Overall timeout for scenario")
     max_retries: int = Field(3, description="Maximum number of retries per step")
     retry_delay_seconds: float = Field(1.0, description="Delay between retries")
-    validate_politeness: bool = Field(False, description="Whether to validate politeness/conversational tone in responses")
-    parallel: bool = Field(False, description="Whether to run this scenario in parallel with others")
-    
-    @model_validator(mode='after')
-    def validate_scenario(self) -> 'ScenarioConfig':
+    validate_politeness: bool = Field(
+        False,
+        description="Whether to validate politeness/conversational tone in responses",
+    )
+    parallel: bool = Field(
+        False, description="Whether to run this scenario in parallel with others"
+    )
+
+    @model_validator(mode="after")
+    def validate_scenario(self) -> "ScenarioConfig":
         """Validate scenario configuration."""
         if self.level == TestLevel.BASIC:
             if not self.steps:
@@ -702,20 +954,33 @@ class ScenarioConfig(BaseModel):
 
 class ScenarioReport(BaseModel):
     """Report for a completed test scenario."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     scenario_name: str = Field(..., description="Name of the scenario")
     passed: bool = Field(..., description="Whether scenario passed overall")
     total_steps: int = Field(..., description="Total number of steps")
     passed_steps: int = Field(..., description="Number of steps that passed")
     failed_steps: int = Field(..., description="Number of steps that failed")
-    total_duration_ms: float = Field(..., description="Total execution time in milliseconds")
-    step_results: List[StepResult] = Field(default_factory=list, description="Results for each step")
+    total_duration_ms: float = Field(
+        ..., description="Total execution time in milliseconds"
+    )
+    step_results: List[StepResult] = Field(
+        default_factory=list, description="Results for each step"
+    )
     source_file: Optional[str] = Field(None, description="Scenario YAML file path")
-    error: Optional[str] = Field(None, description="Overall error message if scenario failed")
-    conversation_history: Optional[str] = Field(None, description="Complete conversation history for agent scenarios")
-    justification: Optional[str] = Field(None, description="Explanation of why the scenario passed or failed")
-    goal_evaluation_result: Optional[GoalEvaluationResult] = Field(None, description="Goal evaluation result for agent scenarios")
+    error: Optional[str] = Field(
+        None, description="Overall error message if scenario failed"
+    )
+    conversation_history: Optional[str] = Field(
+        None, description="Complete conversation history for agent scenarios"
+    )
+    justification: Optional[str] = Field(
+        None, description="Explanation of why the scenario passed or failed"
+    )
+    goal_evaluation_result: Optional[GoalEvaluationResult] = Field(
+        None, description="Goal evaluation result for agent scenarios"
+    )
     artifact_summary: Dict[str, Any] = Field(
         default_factory=dict,
         description="Artifact summary for the scenario",
@@ -740,16 +1005,20 @@ class ScenarioReport(BaseModel):
         None,
         description="Created or updated issue URL",
     )
-    started_at: datetime = Field(default_factory=datetime.now, description="When scenario started")
-    completed_at: Optional[datetime] = Field(None, description="When scenario completed")
-    
+    started_at: datetime = Field(
+        default_factory=datetime.now, description="When scenario started"
+    )
+    completed_at: Optional[datetime] = Field(
+        None, description="When scenario completed"
+    )
+
     @property
     def success_rate(self) -> float:
         """Calculate success rate as percentage."""
         if self.total_steps == 0:
             return 0.0
         return (self.passed_steps / self.total_steps) * 100
-    
+
     @property
     def duration_seconds(self) -> float:
         """Total duration in seconds."""
@@ -758,28 +1027,35 @@ class ScenarioReport(BaseModel):
 
 class TestSuiteReport(BaseModel):
     """Report for a complete test suite run."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     total_scenarios: int = Field(..., description="Total number of scenarios")
     passed_scenarios: int = Field(..., description="Number of scenarios that passed")
     failed_scenarios: int = Field(..., description="Number of scenarios that failed")
-    scenario_reports: List[ScenarioReport] = Field(default_factory=list, description="Individual scenario reports")
-    started_at: datetime = Field(default_factory=datetime.now, description="When test suite started")
-    completed_at: Optional[datetime] = Field(None, description="When test suite completed")
-    
+    scenario_reports: List[ScenarioReport] = Field(
+        default_factory=list, description="Individual scenario reports"
+    )
+    started_at: datetime = Field(
+        default_factory=datetime.now, description="When test suite started"
+    )
+    completed_at: Optional[datetime] = Field(
+        None, description="When test suite completed"
+    )
+
     @property
     def success_rate(self) -> float:
         """Calculate success rate as percentage."""
         if self.total_scenarios == 0:
             return 0.0
         return (self.passed_scenarios / self.total_scenarios) * 100
-    
+
     @property
     def total_duration_ms(self) -> float:
         """Total duration of all scenarios in milliseconds."""
         return sum(report.total_duration_ms for report in self.scenario_reports)
-    
+
     @property
     def duration_seconds(self) -> float:
         """Total duration in seconds."""
-        return self.total_duration_ms / 1000.0 
+        return self.total_duration_ms / 1000.0

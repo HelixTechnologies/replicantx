@@ -4,13 +4,22 @@
 Playwright browser automation driver for ReplicantX browser mode.
 """
 
-from typing import Optional, List
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from typing import List, Literal, Optional
 
-from replicantx.models import BrowserConfig, BrowserObservation
-from replicantx.tools.browser.observation import extract_observation
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+)
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import (
+    async_playwright,
+)
+
+from replicantx.models import BrowserConfig, BrowserObservation, PageSettleStrategy
 from replicantx.tools.browser.actions import execute_action
 from replicantx.tools.browser.artifacts import ArtifactManager
+from replicantx.tools.browser.observation import extract_observation
 
 
 class BrowserAutomationDriver:
@@ -78,7 +87,9 @@ class BrowserAutomationDriver:
 
         # Set default timeouts
         self.page.set_default_timeout(self.config.action_timeout_seconds * 1000)
-        self.page.set_default_navigation_timeout(self.config.navigation_timeout_seconds * 1000)
+        self.page.set_default_navigation_timeout(
+            self.config.navigation_timeout_seconds * 1000
+        )
 
         if self.debug:
             print(f"✅ Browser started (headless={self.config.headless})")
@@ -128,18 +139,28 @@ class BrowserAutomationDriver:
         if self.debug:
             print(f"🔗 Navigating to: {url}")
 
-        await self.page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=self.config.navigation_timeout_seconds * 1000,
-        )
+        page = self.page
+        if not page:
+            raise RuntimeError("Browser not started. Call start() first.")
 
-        # Wait for page to settle
-        await self.page.wait_for_load_state("networkidle", timeout=5000)
+        strategy = self.config.page_settle_strategy
+        wait_until = self._initial_navigation_wait_until(strategy)
+        nav_timeout_ms = self.config.navigation_timeout_seconds * 1000
+
+        await page.goto(url, wait_until=wait_until, timeout=nav_timeout_ms)
+
+        if strategy == PageSettleStrategy.NETWORK_IDLE:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        elif strategy == PageSettleStrategy.BEST_EFFORT:
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except PlaywrightTimeoutError:
+                if self.debug:
+                    print("⚠️ networkidle timeout after initial navigation; continuing")
 
         # Extract observation
         observation = await extract_observation(
-            self.page,
+            page,
             max_interactive_elements=self.config.max_interactive_elements,
             max_visible_text_chars=self.config.max_visible_text_chars,
         )
@@ -150,7 +171,22 @@ class BrowserAutomationDriver:
 
         return observation
 
-    async def perform(self, action, current_observation: Optional[BrowserObservation] = None):
+    @staticmethod
+    def _initial_navigation_wait_until(
+        strategy: PageSettleStrategy,
+    ) -> Literal["domcontentloaded", "load"]:
+        """Playwright `wait_until` for the first `page.goto` of a scenario."""
+        if strategy == PageSettleStrategy.DOM_CONTENT_LOADED:
+            return "domcontentloaded"
+        if strategy == PageSettleStrategy.LOAD:
+            return "load"
+        if strategy == PageSettleStrategy.NETWORK_IDLE:
+            return "domcontentloaded"
+        return "load"
+
+    async def perform(
+        self, action, current_observation: Optional[BrowserObservation] = None
+    ):
         """
         Perform a browser action.
 

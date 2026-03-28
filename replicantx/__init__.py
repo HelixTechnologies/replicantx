@@ -7,8 +7,13 @@ This package provides tools for testing AI agents by calling their HTTP APIs
 with configurable authentication, assertions, and reporting.
 """
 
-__version__ = "0.1.12"
-__author__ = "ReplicantX Team"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("replicantx")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
+__author__ = "Helix Technologies Limited"
 __email__ = "team@replicantx.org"
 
 from .models import (
@@ -29,6 +34,7 @@ from .models import (
     InteractionMode,
     GoalEvidenceMode,
     TraceMode,
+    PageSettleStrategy,
     BrowserConfig,
     BrowserObservation,
     BrowserAction,
@@ -77,6 +83,7 @@ __all__ = [
     "InteractionMode",
     "GoalEvidenceMode",
     "TraceMode",
+    "PageSettleStrategy",
     "BrowserConfig",
     "BrowserObservation",
     "BrowserAction",
