@@ -9,7 +9,7 @@ with configurable authentication, assertions, and reporting.
 
 __version__ = "0.1.12"
 __author__ = "ReplicantX Team"
-__email__ = "team@replicantx.ai"
+__email__ = "team@replicantx.org"
 
 from .models import (
     Message,
