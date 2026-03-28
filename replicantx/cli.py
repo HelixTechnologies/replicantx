@@ -301,6 +301,7 @@ async def run_scenarios_async(
     # Display summary
     display_summary(suite_report, verbose)
     display_issue_summary(suite_report, issue_mode)
+    write_github_outputs(suite_report)
     
     # Generate reports
     if report_path:
@@ -641,6 +642,81 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
                         console.print(f"💭 {scenario.justification}")
                     if scenario.error:
                         console.print(f"❌ Error: {scenario.error}")
+
+
+def _sanitize_output_key(name: str) -> str:
+    """Sanitize a scenario name into a valid GitHub Actions output key segment."""
+    import re
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name).strip("_").lower()
+
+
+def write_github_outputs(suite_report: TestSuiteReport) -> None:
+    """Write per-scenario fields to $GITHUB_OUTPUT when running inside GitHub Actions.
+
+    Emits four outputs per scenario:
+      final_screenshot_path, final_status, final_assessment, goal_evaluation_reason
+
+    When exactly one scenario was run the outputs are written without a prefix so
+    they can be referenced directly as ``steps.<id>.outputs.final_status``.
+    When multiple scenarios ran each output is prefixed with the sanitised scenario
+    name, e.g. ``my_scenario_final_status``.
+    """
+    import os
+
+    github_output_path = os.environ.get("GITHUB_OUTPUT")
+    if not github_output_path:
+        return
+
+    reports = suite_report.scenario_reports
+    if not reports:
+        return
+
+    single = len(reports) == 1
+
+    lines: List[str] = []
+
+    for report in reports:
+        prefix = "" if single else f"{_sanitize_output_key(report.scenario_name)}_"
+
+        # --- final_status ---
+        status = "passed" if report.passed else "failed"
+        lines.append(f"{prefix}final_status={status}")
+
+        # --- final_screenshot_path ---
+        screenshots: List[str] = report.artifact_summary.get("screenshots", [])
+        final_screenshot = screenshots[-1] if screenshots else ""
+        lines.append(f"{prefix}final_screenshot_path={final_screenshot}")
+
+        # --- final_assessment (may be multi-line) ---
+        assessment = (report.justification or "").strip()
+        if "\n" in assessment:
+            delimiter = "RXEOF"
+            lines.append(f"{prefix}final_assessment<<{delimiter}")
+            lines.append(assessment)
+            lines.append(delimiter)
+        else:
+            lines.append(f"{prefix}final_assessment={assessment}")
+
+        # --- goal_evaluation_reason (may be multi-line) ---
+        reason = ""
+        if report.goal_evaluation_result:
+            reason = (report.goal_evaluation_result.reasoning or "").strip()
+        if "\n" in reason:
+            delimiter = "RXEOF"
+            lines.append(f"{prefix}goal_evaluation_reason<<{delimiter}")
+            lines.append(reason)
+            lines.append(delimiter)
+        else:
+            lines.append(f"{prefix}goal_evaluation_reason={reason}")
+
+    try:
+        with open(github_output_path, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        console.print(
+            f"📤 GitHub Actions outputs written ({len(reports)} scenario(s))"
+        )
+    except OSError as exc:
+        console.print(f"⚠️  Could not write to $GITHUB_OUTPUT: {exc}")
 
 
 def display_issue_summary(
