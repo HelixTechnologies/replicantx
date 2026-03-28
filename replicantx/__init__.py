@@ -7,7 +7,7 @@ This package provides tools for testing AI agents by calling their HTTP APIs
 with configurable authentication, assertions, and reporting.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.12"
 __author__ = "ReplicantX Team"
 __email__ = "team@replicantx.ai"
 
