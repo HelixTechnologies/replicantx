@@ -57,7 +57,8 @@ class PlannedAction(BaseModel):
     action_type: str = Field(
         ...,
         description=(
-            "One of: click, fill, send_chat, compose_chat, submit_chat, press, wait, scroll, navigate"
+            "One of: click, fill, send_chat, compose_chat, submit_chat, press, wait, scroll, navigate, done. "
+            "Use 'done' when you are certain the goal has been fully achieved and no further action is needed."
         ),
     )
     target: Optional[str] = Field(
@@ -210,6 +211,25 @@ class BrowserScenarioRunner:
 
                 if action.action_type in ("send_chat", "submit_chat"):
                     initial_message_sent = True
+
+                # When the planner signals completion, go straight to goal evaluation
+                # without recording a spurious "done" browser action.
+                if action.action_type == "done":
+                    if self.watch:
+                        print(f"🏁 Planner signalled goal complete — evaluating…")
+                    goal_achieved = await self._evaluate_goal()
+                    if goal_achieved:
+                        passed = True
+                        justification = self._generate_justification(goal_achieved=True)
+                        if self.watch:
+                            print(f"\n✅ GOAL ACHIEVED: {self.replicant_config.goal}")
+                        break
+                    else:
+                        # Evaluator disagrees — continue so the planner can try again
+                        if self.watch:
+                            print(f"⚠️  Planner said done but evaluator disagrees — continuing")
+                        turn += 1
+                        continue
 
                 # Execute the action
                 result = await self._execute_action_turn(action, turn)
@@ -772,6 +792,7 @@ class BrowserScenarioRunner:
         allowed_action_types = {
             "click",
             "compose_chat",
+            "done",
             "fill",
             "navigate",
             "press",

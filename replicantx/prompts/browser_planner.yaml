@@ -35,9 +35,13 @@ template: |
     wait    — wait for the page to update (no parameters needed)
     scroll  — scroll the page (set value to 'up' or 'down')
     navigate — go to a URL (set url to the destination)
+    done    — signal that the goal has been fully and definitively achieved (no parameters needed).
+      Use this ONLY when you are certain the goal is complete and confirmed in the UI.
+      Do NOT use done speculatively — only when success is visible on screen.
 
   Important rules:
   - Look at the SCREENSHOT to understand what the page shows.
+  - If the goal is clearly complete (confirmed in the UI), use the 'done' action immediately instead of waiting.
   - If you see a form (login, onboarding, profile, etc.), fill it out step by step.
   - If the page has a chat interface and you're ready to chat, use send_chat for simple messages.
   - STAGED CHAT: If your message includes @mentions, slash commands, or triggers an autocomplete/dropdown,
