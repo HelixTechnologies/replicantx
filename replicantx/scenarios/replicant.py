@@ -13,9 +13,8 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from pydantic import BaseModel, Field, PrivateAttr
-from pydantic_ai import Agent as PydanticAgent
+from pydantic_ai import Agent as PydanticAgent, BinaryContent
 from pydantic_ai.models import infer_model
-from pydantic_ai.messages import ImageUrl
 
 from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode, BrowserObservation, GoalEvidenceMode
 from ..tools.http_client import HTTPResponse
@@ -371,13 +370,10 @@ class GoalEvaluator(BaseModel):
             Goal evaluation result
         """
         try:
-            import base64
             from pathlib import Path
 
-            # Read and encode screenshot
+            # Read screenshot bytes
             screenshot_bytes = Path(screenshot_path).read_bytes()
-            base64_image = base64.b64encode(screenshot_bytes).decode('utf-8')
-            data_url = f"data:image/png;base64,{base64_image}"
 
             # Build multimodal prompt
             prompt = self._build_screenshot_evaluation_prompt(goal, conversation, facts)
@@ -409,24 +405,21 @@ class GoalEvaluator(BaseModel):
                 print(prompt)
                 print(f"{sep}\n")
 
-            # Run multimodal evaluation with image
+            # Run multimodal evaluation — pass screenshot as BinaryContent (same as planner)
             result = await agent.run(
-                prompt,
-                message_history=[
-                    {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}}
-                    ]}
+                [
+                    prompt,
+                    BinaryContent(data=screenshot_bytes, media_type="image/png"),
                 ]
             )
             evaluation = result.output
 
             # Record token usage if a tracker is attached
             if self._token_tracker is not None:
-                model_to_use = self.screenshot_model_name or self.model_name
-                if model_to_use:
+                record_model = self.screenshot_model_name or self.model_name
+                if record_model:
                     self._token_tracker.record_pydantic_usage(
-                        model_to_use, result.usage(), purpose="screenshot_evaluation"
+                        record_model, result.usage(), purpose="screenshot_evaluation"
                     )
 
             return GoalEvaluationResult(

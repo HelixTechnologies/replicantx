@@ -217,7 +217,9 @@ class BrowserScenarioRunner:
                 if action.action_type == "done":
                     if self.watch:
                         print(f"🏁 Planner signalled goal complete — evaluating…")
-                    goal_achieved = await self._evaluate_goal()
+                    goal_achieved = await self._evaluate_goal(
+                        planner_reasoning=self._pending_planned_reasoning
+                    )
                     if goal_achieved:
                         passed = True
                         justification = self._generate_justification(goal_achieved=True)
@@ -733,19 +735,22 @@ class BrowserScenarioRunner:
     # Goal evaluation (unchanged — uses existing GoalEvaluator)
     # ------------------------------------------------------------------
 
-    async def _evaluate_goal(self) -> bool:
+    async def _evaluate_goal(self, planner_reasoning: Optional[str] = None) -> bool:
         from replicantx.scenarios.replicant import GoalEvaluator
         from replicantx.models import GoalEvidenceMode
 
         evaluator = GoalEvaluator.create(self.replicant_config, verbose=self.verbose, llm_debug=self.llm_debug)
         evaluator.set_tracker(self._token_tracker)
 
-        conversation_text = "\n".join(
-            [
-                f"Action: {r.action_summary or r.user_message}"
-                for r in self.step_results
-            ]
-        )
+        lines = [
+            f"Action: {r.action_summary or r.user_message}"
+            for r in self.step_results
+        ]
+        # If the planner signalled done, include its reasoning so the evaluator
+        # has the same context that led the planner to conclude completion.
+        if planner_reasoning:
+            lines.append(f"Planner assessment: {planner_reasoning}")
+        conversation_text = "\n".join(lines)
 
         goal_evidence = self.browser_config.goal_evidence
         screenshot_path = None
