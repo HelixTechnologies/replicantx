@@ -20,6 +20,7 @@ from ..models import (
 from ..tools.http_client import HTTPClient, HTTPResponse
 from ..tools.payload_formatter import PayloadFormatter
 from ..tools.session_manager import SessionManager
+from ..tools.token_usage import TokenUsageTracker
 from .replicant import ReplicantAgent
 from rich.console import Console
 
@@ -46,6 +47,11 @@ class AgentScenarioRunner:
         self.auth_provider = self._create_auth_provider()
         self.http_client: Optional[HTTPClient] = None
         self.replicant_agent: Optional[ReplicantAgent] = None
+        
+        # Create a token usage tracker for this scenario run
+        self._token_tracker = TokenUsageTracker(
+            pricing_overrides=dict(config.model_pricing_overrides) if config.model_pricing_overrides else None
+        )
         
         # Initialize session manager if replicant config is available
         self.session_manager: Optional[SessionManager] = None
@@ -151,7 +157,7 @@ class AgentScenarioRunner:
         })
         
         # Initialize Replicant agent
-        self.replicant_agent = ReplicantAgent.create(self.config.replicant, verbose=self.verbose, llm_debug=self.llm_debug)
+        self.replicant_agent = ReplicantAgent.create(self.config.replicant, verbose=self.verbose, llm_debug=self.llm_debug, token_tracker=self._token_tracker)
         
         current_datetime = datetime.now()
         date_str = current_datetime.strftime("%A, %B %d, %Y")
@@ -341,6 +347,11 @@ class AgentScenarioRunner:
                         self._watch_log(f"🧠 Evaluation method: {method}" + (" (fallback used)" if fallback else ""))
                         self._watch_log(f"📊 Confidence: {confidence:.2f}")
                         self._watch_log(f"💭 Reasoning: {reasoning}")
+                
+                # Token usage summary
+                token_summary = self._token_tracker.get_summary()
+                if token_summary.total_tokens > 0:
+                    self._watch_log(f"💰 Tokens: {token_summary.total_input_tokens:,} in / {token_summary.total_output_tokens:,} out  |  Est. cost: ${token_summary.total_cost_usd:.6f}")
             
             self._debug_log("Scenario completed", {
                 "passed": report.passed,
@@ -370,6 +381,9 @@ class AgentScenarioRunner:
             if self.http_client:
                 await self.http_client.close()
         
+        # Attach token usage summary regardless of pass/fail outcome
+        report.token_usage = self._token_tracker.get_summary()
+
         return report
     
     async def _execute_conversation_step(self, step_index: int, user_message: str) -> StepResult:

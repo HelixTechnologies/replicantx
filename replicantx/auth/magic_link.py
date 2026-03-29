@@ -99,6 +99,8 @@ class SupabaseMagicLinkAuth(AuthBase):
             # Use the browser context's APIRequestContext to call the app
             # refresh endpoint — Set-Cookie headers update the browser
             # context cookie jar automatically (Playwright feature).
+            # Note: data=dict is serialised as JSON by Playwright 1.x (json.dumps
+            # internally), so no explicit Content-Type override is needed.
             request_context = self._browser_context.request
             headers = {
                 "Content-Type": "application/json",
@@ -121,6 +123,15 @@ class SupabaseMagicLinkAuth(AuthBase):
                     f"Failed to call refresh endpoint: "
                     f"{response.status} {response.status_text} — {body}"
                 )
+
+            # Debug: report cookies set by the refresh response so auth issues
+            # can be diagnosed quickly.
+            cookies = await self._browser_context.cookies()
+            cookie_names = [c["name"] for c in cookies]
+            print(
+                f"🔐 Auth refresh OK ({response.status}) — "
+                f"cookies in context: {cookie_names if cookie_names else '(none)'}"
+            )
 
             self._token = access_token
             return access_token

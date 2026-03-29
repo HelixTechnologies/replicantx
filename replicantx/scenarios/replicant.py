@@ -9,16 +9,31 @@ configurable facts and system prompts to achieve specific goals.
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.models import infer_model
 from pydantic_ai.messages import ImageUrl
 
 from ..models import ReplicantConfig, Message, GoalEvaluationResult, GoalEvaluationMode, BrowserObservation, GoalEvidenceMode
 from ..tools.http_client import HTTPResponse
+from ..tools.token_usage import TokenUsageTracker
+
+
+class GoalEvaluationOutput(BaseModel):
+    """Structured output from the goal evaluation LLM."""
+
+    goal_achieved: bool = Field(
+        ..., description="True if the goal has been definitively achieved, False otherwise"
+    )
+    confidence: float = Field(
+        ..., description="Confidence score from 0.0 (not achieved) to 1.0 (definitely achieved)"
+    )
+    reasoning: str = Field(
+        ..., description="Brief explanation of the decision"
+    )
 
 
 class ConversationState(BaseModel):
@@ -43,6 +58,12 @@ class GoalEvaluator(BaseModel):
     completion_keywords: List[str] = Field(..., description="Keywords for keyword-based evaluation")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
     llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
+
+    _token_tracker: Optional[TokenUsageTracker] = PrivateAttr(default=None)
+
+    def set_tracker(self, tracker: TokenUsageTracker) -> None:
+        """Attach a :class:`TokenUsageTracker` to record LLM usage."""
+        self._token_tracker = tracker
 
     @classmethod
     def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "GoalEvaluator":
@@ -234,13 +255,13 @@ class GoalEvaluator(BaseModel):
             # Build evaluation prompt
             prompt = self._build_evaluation_prompt(goal, conversation, facts, current_observation)
 
-            # Create LLM agent for evaluation
+            # Create LLM agent for evaluation with structured output
             model = infer_model(self.model_name)
-            # Only include max_tokens for evaluation - don't set temperature to avoid compatibility issues
-            agent = PydanticAgent(
+            agent: PydanticAgent[None, GoalEvaluationOutput] = PydanticAgent(
                 model=model,
+                output_type=GoalEvaluationOutput,
                 instructions="You are an expert at evaluating whether conversation goals have been achieved. Be precise and analytical.",
-                model_settings={"max_tokens": 1000}  # Only include max_tokens, skip temperature for compatibility
+                model_settings={"max_tokens": 1000},
             )
 
             # Verbose/LLM-debug logging of the goal evaluation prompt
@@ -257,19 +278,22 @@ class GoalEvaluator(BaseModel):
                 print(prompt)
                 print(f"{sep}\n")
 
-            # Get evaluation
+            # Get structured evaluation
             result = await agent.run(prompt)
-            response = result.output.strip()
+            evaluation = result.output
 
-            # Parse LLM response
-            goal_achieved, confidence, reasoning = self._parse_llm_response(response)
+            # Record token usage if a tracker is attached
+            if self._token_tracker is not None and self.model_name:
+                self._token_tracker.record_pydantic_usage(
+                    self.model_name, result.usage(), purpose="goal_evaluation"
+                )
 
             return GoalEvaluationResult(
-                goal_achieved=goal_achieved,
-                confidence=confidence,
-                reasoning=reasoning,
+                goal_achieved=evaluation.goal_achieved,
+                confidence=max(0.0, min(1.0, evaluation.confidence)),
+                reasoning=evaluation.reasoning,
                 evaluation_method="intelligent",
-                fallback_used=False
+                fallback_used=False,
             )
 
         except Exception as e:
@@ -279,7 +303,7 @@ class GoalEvaluator(BaseModel):
                 confidence=0.0,
                 reasoning=f"LLM evaluation failed: {str(e)}",
                 evaluation_method="intelligent",
-                fallback_used=False
+                fallback_used=False,
             )
     
     async def _evaluate_hybrid(
@@ -358,14 +382,15 @@ class GoalEvaluator(BaseModel):
             # Build multimodal prompt
             prompt = self._build_screenshot_evaluation_prompt(goal, conversation, facts)
 
-            # Create LLM agent for evaluation
+            # Create LLM agent for evaluation with structured output
             # Use screenshot_model_name if specified, otherwise fall back to model_name
             model_to_use = self.screenshot_model_name or self.model_name
             model = infer_model(model_to_use)
-            agent = PydanticAgent(
+            agent: PydanticAgent[None, GoalEvaluationOutput] = PydanticAgent(
                 model=model,
+                output_type=GoalEvaluationOutput,
                 instructions="You are an expert at evaluating whether conversation goals have been achieved by analyzing screenshots. Be precise and analytical.",
-                model_settings={"max_tokens": 1000}
+                model_settings={"max_tokens": 1000},
             )
 
             # Verbose/LLM-debug logging
@@ -394,17 +419,22 @@ class GoalEvaluator(BaseModel):
                     ]}
                 ]
             )
-            response = result.output.strip()
+            evaluation = result.output
 
-            # Parse LLM response
-            goal_achieved, confidence, reasoning = self._parse_llm_response(response)
+            # Record token usage if a tracker is attached
+            if self._token_tracker is not None:
+                model_to_use = self.screenshot_model_name or self.model_name
+                if model_to_use:
+                    self._token_tracker.record_pydantic_usage(
+                        model_to_use, result.usage(), purpose="screenshot_evaluation"
+                    )
 
             return GoalEvaluationResult(
-                goal_achieved=goal_achieved,
-                confidence=confidence,
-                reasoning=f"Screenshot-based evaluation: {reasoning}",
+                goal_achieved=evaluation.goal_achieved,
+                confidence=max(0.0, min(1.0, evaluation.confidence)),
+                reasoning=f"Screenshot-based evaluation: {evaluation.reasoning}",
                 evaluation_method="intelligent",
-                fallback_used=False
+                fallback_used=False,
             )
 
         except Exception as e:
@@ -414,7 +444,7 @@ class GoalEvaluator(BaseModel):
                 confidence=0.0,
                 reasoning=f"Screenshot evaluation failed: {str(e)}",
                 evaluation_method="intelligent",
-                fallback_used=False
+                fallback_used=False,
             )
 
     def _build_screenshot_evaluation_prompt(
@@ -442,7 +472,7 @@ class GoalEvaluator(BaseModel):
             )
 
         # Build evaluation prompt
-        prompt = f"""Given this conversation goal: "{goal}"
+        return f"""Given this conversation goal: "{goal}"
 
 User facts: {json.dumps(facts, indent=2)}
 
@@ -453,14 +483,7 @@ Analyze the screenshot to determine if the goal has been achieved. Consider:
 1. Is there visible confirmation of completion (success messages, confirmation numbers, booking details)?
 2. Does the UI show the desired end state (form submitted, action completed, goal reached)?
 3. Look for specific visual indicators like success icons, confirmation dialogs, completion screens
-4. Distinguish between intermediate steps vs final completion
-
-Respond in this exact format:
-RESULT: [ACHIEVED or NOT_ACHIEVED]
-CONFIDENCE: [0.0 to 1.0]
-REASONING: [Brief explanation of your decision based on the screenshot]"""
-
-        return prompt
+4. Distinguish between intermediate steps vs final completion"""
 
     def _build_evaluation_prompt(
         self,
@@ -515,11 +538,6 @@ REASONING: [Brief explanation of your decision based on the screenshot]"""
             "2. Are there concrete indicators of success (confirmation numbers, bookings, etc.)?",
             "3. Distinguish between promises (\"I will do this\") vs accomplishments (\"This is done\")",
             "4. Look for specific completion indicators, not just polite acknowledgments",
-            "",
-            "Respond in this exact format:",
-            "RESULT: [ACHIEVED or NOT_ACHIEVED]",
-            "CONFIDENCE: [0.0 to 1.0]",
-            "REASONING: [Brief explanation of your decision]",
         ])
 
         return "\n".join(prompt_parts)
@@ -538,55 +556,6 @@ REASONING: [Brief explanation of your decision based on the screenshot]"""
             role = "User" if msg.role == "user" else "Assistant"
             formatted.append(f"{role}: {msg.content}")
         return "\n".join(formatted)
-    
-    def _parse_llm_response(self, response: str) -> Tuple[bool, float, str]:
-        """Parse LLM evaluation response.
-        
-        Args:
-            response: Raw LLM response
-            
-        Returns:
-            Tuple of (goal_achieved, confidence, reasoning)
-        """
-        lines = response.strip().split('\n')
-        
-        goal_achieved = False
-        confidence = 0.5
-        reasoning = "Could not parse LLM response"
-        
-        # Track if we're currently parsing reasoning
-        parsing_reasoning = False
-        reasoning_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith('RESULT:'):
-                result_text = line.replace('RESULT:', '').strip().upper()
-                goal_achieved = result_text == 'ACHIEVED'
-                parsing_reasoning = False
-            elif line.startswith('CONFIDENCE:'):
-                try:
-                    confidence = float(line.replace('CONFIDENCE:', '').strip())
-                    confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
-                except ValueError:
-                    confidence = 0.5
-                parsing_reasoning = False
-            elif line.startswith('REASONING:'):
-                # Start parsing reasoning
-                parsing_reasoning = True
-                reasoning_lines = [line.replace('REASONING:', '').strip()]
-            elif parsing_reasoning and line:
-                # Continue parsing reasoning until we hit another section
-                reasoning_lines.append(line)
-            elif parsing_reasoning and not line:
-                # Empty line might indicate end of reasoning, but continue in case there's more
-                continue
-        
-        # Combine all reasoning lines
-        if reasoning_lines:
-            reasoning = ' '.join(reasoning_lines).strip()
-        
-        return goal_achieved, confidence, reasoning
 
 
 class ResponseGenerator(BaseModel):
@@ -599,6 +568,12 @@ class ResponseGenerator(BaseModel):
     facts: Dict[str, Any] = Field(..., description="Available facts")
     verbose: bool = Field(False, description="Enable verbose output for system prompts")
     llm_debug: bool = Field(False, description="Print complete LLM prompts on every call")
+
+    _token_tracker: Optional[TokenUsageTracker] = PrivateAttr(default=None)
+
+    def set_tracker(self, tracker: TokenUsageTracker) -> None:
+        """Attach a :class:`TokenUsageTracker` to record LLM usage."""
+        self._token_tracker = tracker
     
     def _create_agent(self) -> PydanticAgent:
         """Create a PydanticAI agent instance."""
@@ -667,6 +642,12 @@ class ResponseGenerator(BaseModel):
             
             result = await agent.run(context)
             
+            # Record token usage if a tracker is attached
+            if self._token_tracker is not None:
+                self._token_tracker.record_pydantic_usage(
+                    self.model_name, result.usage(), purpose="response_generation"
+                )
+
             return result.output
             
         except Exception as e:
@@ -709,13 +690,14 @@ class ReplicantAgent(BaseModel):
     goal_evaluator: GoalEvaluator = Field(..., description="Goal evaluation utility")
     
     @classmethod
-    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False) -> "ReplicantAgent":
+    def create(cls, config: ReplicantConfig, verbose: bool = False, llm_debug: bool = False, token_tracker: Optional[TokenUsageTracker] = None) -> "ReplicantAgent":
         """Create a new Replicant agent.
         
         Args:
             config: Replicant configuration
             verbose: Enable verbose output for system prompts
             llm_debug: Print complete LLM prompts on every call
+            token_tracker: Optional tracker to record LLM token usage and cost
             
         Returns:
             Configured Replicant agent
@@ -735,8 +717,12 @@ class ReplicantAgent(BaseModel):
             verbose=verbose,
             llm_debug=llm_debug,
         )
+        if token_tracker is not None:
+            response_generator.set_tracker(token_tracker)
         
         goal_evaluator = GoalEvaluator.create(config, verbose=verbose, llm_debug=llm_debug)
+        if token_tracker is not None:
+            goal_evaluator.set_tracker(token_tracker)
         
         return cls(
             config=config,

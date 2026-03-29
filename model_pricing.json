@@ -1,0 +1,116 @@
+{
+    "model_pricing": [
+      {
+        "model_identifier": "gpt-4.1-mini",
+        "input_cost_per_million": 0.40,
+        "output_cost_per_million": 1.60,
+        "is_active": true,
+        "notes": "GPT-4.1 Mini. Current OpenAI rate as of March 2026."
+      },
+      {
+        "model_identifier": "gpt-4o",
+        "input_cost_per_million": 2.50,
+        "output_cost_per_million": 10.00,
+        "is_active": true,
+        "notes": "GPT-4o. Pricing cut from $5/$15 in late 2024 to $2.50/$10. Current OpenAI rate March 2026."
+      },
+      {
+        "model_identifier": "gpt-5.4",
+        "input_cost_per_million": 2.50,
+        "output_cost_per_million": 15.00,
+        "is_active": true,
+        "notes": "GPT-5.4 flagship. 272K context (1M experimental). OpenAI API pricing March 2026."
+      },
+      {
+        "model_identifier": "gpt-5.4-mini",
+        "input_cost_per_million": 0.75,
+        "output_cost_per_million": 4.50,
+        "is_active": true,
+        "notes": "GPT-5.4 Mini. 400K context. ~30% of flagship cost. Launched March 17, 2026."
+      },
+      {
+        "model_identifier": "gpt-5.4-nano",
+        "input_cost_per_million": 0.20,
+        "output_cost_per_million": 1.25,
+        "is_active": true,
+        "notes": "GPT-5.4 Nano. 400K context. Ultra-low cost for batch/classification tasks. Launched March 17, 2026."
+      },
+      {
+        "model_identifier": "gemini-3-flash-preview",
+        "input_cost_per_million": 0.50,
+        "output_cost_per_million": 3.00,
+        "is_active": true,
+        "notes": "Gemini 3 Flash Preview. 1M token context. Released Dec 17, 2025. Default model in Gemini app."
+      },
+      {
+        "model_identifier": "gemini-3-flash",
+        "input_cost_per_million": 0.50,
+        "output_cost_per_million": 3.00,
+        "is_active": true,
+        "notes": "Gemini 3 Flash. 1M token context. GA release of Gemini 3 Flash."
+      },
+      {
+        "model_identifier": "gemini-3.1-flash-lite",
+        "input_cost_per_million": 0.25,
+        "output_cost_per_million": 1.50,
+        "is_active": true,
+        "notes": "Gemini 3.1 Flash-Lite Preview. Cheapest Gemini 3 text lane. $0.50/1M audio input. March 2026."
+      },
+      {
+        "model_identifier": "gemini-3.1-pro-preview",
+        "input_cost_per_million": 2.00,
+        "output_cost_per_million": 12.00,
+        "is_active": true,
+        "notes": "Gemini 3.1 Pro Preview. 1M token context. Released Feb 19, 2026; replaced gemini-3-pro-preview on Mar 9, 2026. Standard pricing ≤200K tokens: $2/$12. Above 200K: $4/$18 input/output. Batch pricing: $1/$6 (≤200K). Thinking tokens included in output cost."
+      },
+      {
+        "model_identifier": "sonar",
+        "input_cost_per_million": 1.00,
+        "output_cost_per_million": 1.00,
+        "is_active": true,
+        "notes": "Perplexity Sonar. 127K context. Lightweight search model. Search requests billed separately at $5/1K."
+      },
+      {
+        "model_identifier": "sonar-reasoning",
+        "input_cost_per_million": 1.00,
+        "output_cost_per_million": 5.00,
+        "is_active": true,
+        "notes": "Perplexity Sonar Reasoning. 127K context. Higher output cost reflects chain-of-thought reasoning tokens."
+      },
+      {
+        "model_identifier": "sonar-reasoning-pro",
+        "input_cost_per_million": 2.00,
+        "output_cost_per_million": 8.00,
+        "is_active": true,
+        "notes": "Perplexity Sonar Reasoning Pro. 128K context. Advanced reasoning with search grounding."
+      },
+      {
+        "model_identifier": "sonar-pro",
+        "input_cost_per_million": 3.00,
+        "output_cost_per_million": 15.00,
+        "is_active": true,
+        "notes": "Perplexity Sonar Pro. 200K context. Flagship search+synthesis model."
+      },
+      {
+        "model_identifier": "sonar-deep-research",
+        "input_cost_per_million": 2.00,
+        "output_cost_per_million": 8.00,
+        "is_active": true,
+        "notes": "Perplexity Sonar Deep Research. 128K context. Multi-step retrieval + reasoning. Search queries billed at $5/1K separately."
+      },
+      {
+        "model_identifier": "claude-opus-4-6",
+        "input_cost_per_million": 5.00,
+        "output_cost_per_million": 25.00,
+        "is_active": true,
+        "notes": "Claude Opus 4.6. 200K standard context (1M beta). Released February 2026. 67% cheaper than Opus 4.1 era ($15/$75). Premium long-context (>200K) billed at $10/$37.50."
+      },
+      {
+        "model_identifier": "claude-sonnet-4-6",
+        "input_cost_per_million": 3.00,
+        "output_cost_per_million": 15.00,
+        "is_active": true,
+        "notes": "Claude Sonnet 4.6. 1M token context (beta). Released February 17, 2026. Default model on claude.ai. Long-context requests (>200K input) billed at $6/$22.50."
+      }
+    ]
+  }

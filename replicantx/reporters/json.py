@@ -78,6 +78,7 @@ class JSONReporter:
                 "started_at": report.started_at.isoformat(),
                 "completed_at": report.completed_at.isoformat() if report.completed_at else None,
             },
+            "token_usage": self._serialize_model(report.token_usage),
             "error": report.error,
             "justification": report.justification,
             "goal_evaluation_result": self._serialize_goal_evaluation_result(report.goal_evaluation_result) if report.goal_evaluation_result else None,
@@ -121,6 +122,7 @@ class JSONReporter:
                 "started_at": report.started_at.isoformat(),
                 "completed_at": report.completed_at.isoformat() if report.completed_at else None,
             },
+            "token_usage": self._serialize_model(report.token_usage),
             "scenario_reports": [
                 self._serialize_scenario_report(scenario) for scenario in report.scenario_reports
             ],

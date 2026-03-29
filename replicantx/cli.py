@@ -39,6 +39,7 @@ from .models import (
     ScenarioConfig,
     TestLevel,
     TestSuiteReport,
+    TokenUsageSummary,
 )
 from .scenarios import BasicScenarioRunner, AgentScenarioRunner, BrowserScenarioRunner
 from .reporters import MarkdownReporter, JSONReporter
@@ -286,6 +287,9 @@ async def run_scenarios_async(
     
     # Finalize report
     suite_report.completed_at = datetime.now()
+
+    # Aggregate token usage across all scenarios
+    suite_report.token_usage = _aggregate_suite_token_usage(suite_report)
 
     if issue_mode != IssueMode.OFF:
         issue_config = IssueProcessingConfig.from_runtime(
@@ -573,6 +577,45 @@ def load_scenario_config(file_path: str) -> ScenarioConfig:
         raise Exception(f"Invalid scenario configuration: {e}")
 
 
+def _aggregate_suite_token_usage(suite_report: "TestSuiteReport") -> "Optional[TokenUsageSummary]":
+    """Aggregate token usage across all scenario reports into a suite-level summary."""
+    from .tools.token_usage import TokenUsageTracker
+    from .models import TokenUsageSummary
+
+    combined = TokenUsageTracker()
+    for scenario in suite_report.scenario_reports:
+        if scenario.token_usage and scenario.token_usage.total_tokens > 0:
+            for entry in scenario.token_usage.by_model:
+                for _ in range(entry.call_count):
+                    combined._records.append(
+                        (entry.model, entry.input_tokens // entry.call_count, entry.output_tokens // entry.call_count, entry.purpose)
+                    )
+            combined._overrides = {}  # already computed costs are preserved via re-calculation
+
+    summary = combined.get_summary()
+    # Re-compute costs from actual scenario summaries to preserve precision
+    total_cost = sum(
+        s.token_usage.total_cost_usd
+        for s in suite_report.scenario_reports
+        if s.token_usage
+    )
+    has_unknown = any(
+        s.token_usage.has_unknown_models
+        for s in suite_report.scenario_reports
+        if s.token_usage
+    )
+    total_input = sum(s.token_usage.total_input_tokens for s in suite_report.scenario_reports if s.token_usage)
+    total_output = sum(s.token_usage.total_output_tokens for s in suite_report.scenario_reports if s.token_usage)
+    if total_input == 0 and total_output == 0:
+        return None
+    summary.total_cost_usd = round(total_cost, 8)
+    summary.total_input_tokens = total_input
+    summary.total_output_tokens = total_output
+    summary.total_tokens = total_input + total_output
+    summary.has_unknown_models = has_unknown
+    return summary
+
+
 def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
     """Display test execution summary.
     
@@ -599,6 +642,15 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
     table.add_row("Success Rate", f"{suite_report.success_rate:.1f}%")
     table.add_row("Total Duration", f"{suite_report.duration_seconds:.2f}s")
     
+    # Add token usage to the summary table if any was collected
+    if suite_report.token_usage and suite_report.token_usage.total_tokens > 0:
+        tu = suite_report.token_usage
+        table.add_row("Total Input Tokens", f"{tu.total_input_tokens:,}")
+        table.add_row("Total Output Tokens", f"{tu.total_output_tokens:,}")
+        table.add_row("Est. Total Cost", f"${tu.total_cost_usd:.6f}")
+        if tu.has_unknown_models:
+            table.add_row("⚠ Pricing", "Some models missing — cost understated")
+    
     console.print(table)
     
     # Scenario details
@@ -610,6 +662,7 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
             scenario_table.add_column("Status")
             scenario_table.add_column("Steps")
             scenario_table.add_column("Duration")
+            scenario_table.add_column("Cost (USD)")
             scenario_table.add_column("Justification")
             
             for scenario in suite_report.scenario_reports:
@@ -617,6 +670,11 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
                 steps = f"{scenario.passed_steps}/{scenario.total_steps}"
                 duration = f"{scenario.duration_seconds:.2f}s"
                 justification = scenario.justification or "No justification available"
+                cost_str = (
+                    f"${scenario.token_usage.total_cost_usd:.6f}"
+                    if scenario.token_usage and scenario.token_usage.total_tokens > 0
+                    else "—"
+                )
                 
                 # Truncate justification for table display
                 if len(justification) > 80:
@@ -627,6 +685,7 @@ def display_summary(suite_report: TestSuiteReport, verbose: bool = False):
                     status,
                     steps,
                     duration,
+                    cost_str,
                     justification
                 )
             

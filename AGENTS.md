@@ -68,15 +68,17 @@ playwright show-trace artifacts/trace.zip
 
 Core areas:
 - `replicantx/cli.py`: Typer CLI entry point
-- `replicantx/models.py`: Pydantic config/result models
+- `replicantx/models.py`: Pydantic config/result models (includes `TokenUsageSummary`, `ModelTokenUsage`, `ModelPricingOverride`)
 - `replicantx/scenarios/basic.py`: Level 1 deterministic scenarios
 - `replicantx/scenarios/agent.py`: Level 2 API-mode Replicant scenarios
 - `replicantx/scenarios/browser_agent.py`: Level 2 browser-mode runner
 - `replicantx/scenarios/replicant.py`: core Replicant logic and goal evaluation
 - `replicantx/auth/`: pluggable authentication providers
-- `replicantx/reporters/`: markdown/json reporters
+- `replicantx/reporters/`: markdown/json reporters (both include token usage sections)
 - `replicantx/tools/browser/`: Playwright observation, actions, artifacts, lifecycle
+- `replicantx/tools/token_usage.py`: `TokenUsageTracker` — accumulates LLM usage and estimates cost
 - `replicantx/issue_reporting.py`: standalone browser issue classification, bundle generation, artifact upload, Logfire enrichment, and GitHub filing
+- `model_pricing.json`: bundled per-model pricing table (USD/million tokens)
 
 ## Browser Issue Reporting
 
@@ -129,6 +131,26 @@ Browser issue reporting:
 
 YAML interpolation uses `{{ env.VARIABLE_NAME }}`.
 
+## Token Usage and Cost Tracking
+
+ReplicantX tracks input/output tokens for every internal LLM call and estimates cost using `model_pricing.json`.
+
+Tracked call sites:
+- `ResponseGenerator.generate_response()` — purpose: `response_generation`
+- `GoalEvaluator._evaluate_with_llm()` — purpose: `goal_evaluation`
+- `GoalEvaluator._evaluate_with_screenshot()` — purpose: `screenshot_evaluation`
+- `BrowserScenarioRunner._plan_next_action()` — purpose: `planner`
+
+Pricing overrides (optional, per-scenario YAML):
+```yaml
+model_pricing_overrides:
+  "gpt-4.1-mini":
+    input_cost_per_million: 0.40
+    output_cost_per_million: 1.60
+```
+
+Token usage is attached to `ScenarioReport.token_usage` and aggregated into `TestSuiteReport.token_usage`.
+
 ## Notes For Agents
 
 - Prefer `rg` for search.
@@ -136,3 +158,4 @@ YAML interpolation uses `{{ env.VARIABLE_NAME }}`.
 - Do not assume browser issue signals are blocking user-visible failures.
 - When working on browser issue reporting, keep the local bundle format reusable outside GitHub Actions.
 - The default repo-level Logfire query config path is `replicantx.logfire.yaml` or `replicantx.logfire.yml`.
+- When adding new LLM call sites, call `tracker.record_pydantic_usage(model_name, result.usage(), purpose="<role>")` immediately after `await agent.run(...)` to ensure usage is captured.

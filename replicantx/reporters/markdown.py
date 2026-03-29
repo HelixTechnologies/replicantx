@@ -84,6 +84,30 @@ class MarkdownReporter:
                 lines.append(f"**Issue URL:** {report.issue_url}")
             lines.append("")
         
+        # Token usage summary (agent / browser scenarios)
+        if report.token_usage and report.token_usage.total_tokens > 0:
+            tu = report.token_usage
+            lines.append("## Token Usage & Cost")
+            lines.append("")
+            lines.append(f"**Total Input Tokens:** {tu.total_input_tokens:,}")
+            lines.append(f"**Total Output Tokens:** {tu.total_output_tokens:,}")
+            lines.append(f"**Total Tokens:** {tu.total_tokens:,}")
+            lines.append(f"**Estimated Cost:** ${tu.total_cost_usd:.6f}")
+            if tu.has_unknown_models:
+                lines.append("*⚠ One or more models had no pricing entry — cost may be understated.*")
+            lines.append(f"**Pricing Source:** {tu.pricing_source}")
+            if tu.by_model:
+                lines.append("")
+                lines.append("| Model | Purpose | Input Tokens | Output Tokens | Cost (USD) | Calls |")
+                lines.append("|-------|---------|-------------|--------------|-----------|-------|")
+                for entry in tu.by_model:
+                    lines.append(
+                        f"| `{entry.model}` | {entry.purpose} "
+                        f"| {entry.input_tokens:,} | {entry.output_tokens:,} "
+                        f"| ${entry.cost_usd:.6f} | {entry.call_count} |"
+                    )
+            lines.append("")
+        
         # Complete conversation history for agent scenarios
         if hasattr(report, 'conversation_history') and report.conversation_history:
             lines.append(report.conversation_history)
@@ -210,6 +234,29 @@ class MarkdownReporter:
             lines.append(f"**Completed:** {report.completed_at.strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("")
         
+        # Suite-level token usage summary
+        if report.token_usage and report.token_usage.total_tokens > 0:
+            tu = report.token_usage
+            lines.append("## Token Usage & Cost (Suite Total)")
+            lines.append("")
+            lines.append(f"**Total Input Tokens:** {tu.total_input_tokens:,}")
+            lines.append(f"**Total Output Tokens:** {tu.total_output_tokens:,}")
+            lines.append(f"**Total Tokens:** {tu.total_tokens:,}")
+            lines.append(f"**Estimated Cost:** ${tu.total_cost_usd:.6f}")
+            if tu.has_unknown_models:
+                lines.append("*⚠ One or more models had no pricing entry — cost may be understated.*")
+            if tu.by_model:
+                lines.append("")
+                lines.append("| Model | Purpose | Input Tokens | Output Tokens | Cost (USD) | Calls |")
+                lines.append("|-------|---------|-------------|--------------|-----------|-------|")
+                for entry in tu.by_model:
+                    lines.append(
+                        f"| `{entry.model}` | {entry.purpose} "
+                        f"| {entry.input_tokens:,} | {entry.output_tokens:,} "
+                        f"| ${entry.cost_usd:.6f} | {entry.call_count} |"
+                    )
+            lines.append("")
+        
         # Scenarios summary table
         if report.scenario_reports:
             lines.append("## Scenarios Summary")
@@ -252,6 +299,14 @@ class MarkdownReporter:
                         lines.append(f"**Issue URL:** {scenario.issue_url}")
                     elif scenario.issue_markdown_path:
                         lines.append(f"**Issue Draft:** `{scenario.issue_markdown_path}`")
+
+                # Token usage per scenario (brief)
+                if scenario.token_usage and scenario.token_usage.total_tokens > 0:
+                    tu = scenario.token_usage
+                    lines.append(
+                        f"**Token Usage:** {tu.total_input_tokens:,} in / {tu.total_output_tokens:,} out  |  "
+                        f"Est. cost: ${tu.total_cost_usd:.6f}"
+                    )
 
                 # Goal evaluation details for agent scenarios
                 if scenario.goal_evaluation_result:

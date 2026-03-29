@@ -85,9 +85,59 @@ replicant:
 
     # Artifacts
     trace: retain-on-failure  # off | retain-on-failure | on
+
+# Optional: override model pricing for cost calculation
+# Keys can include or omit the provider prefix (e.g. "gpt-4.1-mini" or "openai:gpt-4.1-mini")
+# Values override the defaults from model_pricing.json bundled with ReplicantX.
+# Useful when you have negotiated rates, use a fine-tuned model, or need to adjust for a newer pricing tier.
+model_pricing_overrides:
+  "gpt-4.1-mini":
+    input_cost_per_million: 0.40
+    output_cost_per_million: 1.60
+  "gpt-4o":
+    input_cost_per_million: 2.50
+    output_cost_per_million: 10.00
 ```
 
-## Configuration Options
+## Token Usage and Cost Reporting
+
+ReplicantX automatically tracks input and output tokens for every LLM call in a scenario and estimates cost using prices from `model_pricing.json` (bundled with the package).
+
+Multiple models can be used within a single scenario:
+
+| Model role | Configured via |
+|---|---|
+| Response generation | `replicant.llm.model` |
+| DOM-based goal evaluation | `replicant.goal_evaluation_model` |
+| Browser planner (browser mode) | `replicant.browser.planner_model` |
+| Screenshot evaluation (browser mode) | `replicant.browser.screenshot_evaluation_model` |
+
+Each role is tracked separately. The final `TokenUsageSummary` in the report breaks down usage and cost by model and purpose.
+
+### Overriding Pricing in YAML
+
+Add a `model_pricing_overrides` block at the top level of your scenario YAML:
+
+```yaml
+model_pricing_overrides:
+  "gpt-4.1-mini":          # Key without provider prefix
+    input_cost_per_million: 0.40
+    output_cost_per_million: 1.60
+  "openai:claude-sonnet-4-6":  # Key with provider prefix (both forms accepted)
+    input_cost_per_million: 3.00
+    output_cost_per_million: 15.00
+```
+
+Overrides take precedence over `model_pricing.json` for the specified models. All other models fall back to the bundled pricing file.
+
+### Where Token Usage Appears
+
+- **CLI summary table** — input tokens, output tokens, and estimated cost per scenario and suite total
+- **Watch mode** — one-line token summary printed at the end of each scenario
+- **Markdown reports** — a "Token Usage & Cost" table showing per-model breakdown
+- **JSON reports** — `token_usage` object at both scenario and suite level
+
+### Configuration Options
 
 ### Interaction Mode
 - `api` (default) - HTTP API mode

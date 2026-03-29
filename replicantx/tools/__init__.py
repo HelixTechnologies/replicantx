@@ -10,10 +10,13 @@ HTTP client wrappers, payload formatters, session managers, and other helper too
 from .http_client import HTTPClient, HTTPResponse
 from .payload_formatter import PayloadFormatter
 from .session_manager import SessionManager
+from .token_usage import TokenUsageTracker, normalize_model_name
 
 __all__ = [
     "HTTPClient",
     "HTTPResponse",
     "PayloadFormatter",
     "SessionManager",
+    "TokenUsageTracker",
+    "normalize_model_name",
 ] 

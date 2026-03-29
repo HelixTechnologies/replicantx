@@ -137,6 +137,53 @@ class IssueDecision(str, Enum):
     SKIP = "skip"
 
 
+class ModelPricingOverride(BaseModel):
+    """Per-model pricing override for a scenario, expressed as USD per million tokens."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_cost_per_million: float = Field(
+        ..., description="Cost per million input/prompt tokens (USD)"
+    )
+    output_cost_per_million: float = Field(
+        ..., description="Cost per million output/completion tokens (USD)"
+    )
+
+
+class ModelTokenUsage(BaseModel):
+    """Token usage and estimated cost for a single model, grouped by purpose."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(..., description="Model identifier")
+    purpose: str = Field("", description="Role of this model (e.g. response_generation, goal_evaluation, planner, screenshot_evaluation)")
+    input_tokens: int = Field(0, description="Total input tokens consumed")
+    output_tokens: int = Field(0, description="Total output tokens consumed")
+    total_tokens: int = Field(0, description="Total tokens (input + output)")
+    cost_usd: float = Field(0.0, description="Estimated cost in USD")
+    call_count: int = Field(1, description="Number of LLM calls aggregated into this entry")
+
+
+class TokenUsageSummary(BaseModel):
+    """Aggregated token usage and cost summary for a test scenario."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_input_tokens: int = Field(0, description="Total input tokens across all models")
+    total_output_tokens: int = Field(0, description="Total output tokens across all models")
+    total_tokens: int = Field(0, description="Total tokens across all models")
+    total_cost_usd: float = Field(0.0, description="Total estimated cost in USD")
+    by_model: List[ModelTokenUsage] = Field(
+        default_factory=list, description="Usage broken down by model and purpose"
+    )
+    pricing_source: str = Field(
+        "model_pricing.json", description="Source of pricing data used for cost calculation"
+    )
+    has_unknown_models: bool = Field(
+        False, description="True if any models had no matching pricing entry"
+    )
+
+
 class LLMConfig(BaseModel):
     """Configuration for LLM using PydanticAI models."""
 
@@ -291,6 +338,14 @@ class BrowserConfig(BaseModel):
     )
     screenshot_on_failure: bool = Field(
         True, description="Whether to capture screenshot on failure"
+    )
+    post_action_delay_ms: int = Field(
+        0,
+        description=(
+            "Extra milliseconds to wait after each action before the next observation/screenshot. "
+            "Useful when the app animates or loads content after a click that networkidle misses. "
+            "Typical values: 500–2000."
+        ),
     )
 
     # Safety
@@ -939,6 +994,14 @@ class ScenarioConfig(BaseModel):
     parallel: bool = Field(
         False, description="Whether to run this scenario in parallel with others"
     )
+    model_pricing_overrides: Dict[str, "ModelPricingOverride"] = Field(
+        default_factory=dict,
+        description=(
+            "Per-model pricing overrides for cost calculation. "
+            "Key is the model identifier (with or without provider prefix, e.g. 'gpt-4o' or 'openai:gpt-4o'). "
+            "Values override the defaults from model_pricing.json."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_scenario(self) -> "ScenarioConfig":
@@ -1005,6 +1068,10 @@ class ScenarioReport(BaseModel):
         None,
         description="Created or updated issue URL",
     )
+    token_usage: Optional["TokenUsageSummary"] = Field(
+        None,
+        description="Token usage and cost summary for this scenario (populated for agent/browser scenarios)",
+    )
     started_at: datetime = Field(
         default_factory=datetime.now, description="When scenario started"
     )
@@ -1041,6 +1108,10 @@ class TestSuiteReport(BaseModel):
     )
     completed_at: Optional[datetime] = Field(
         None, description="When test suite completed"
+    )
+    token_usage: Optional["TokenUsageSummary"] = Field(
+        None,
+        description="Aggregated token usage and cost across all scenarios in this suite",
     )
 
     @property

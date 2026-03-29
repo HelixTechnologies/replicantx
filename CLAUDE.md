@@ -282,9 +282,33 @@ ReplicantX automatically detects environment variables from `.env` files and sys
 ### Reporting
 
 Rich reporting in multiple formats:
-- **Markdown**: Human-readable reports with timing and assertions
+- **Markdown**: Human-readable reports with timing, assertions, and token usage tables
 - **JSON**: Machine-readable reports for CI/CD integration
-- Includes conversation transcripts, timing data, and assertion results
+- Includes conversation transcripts, timing data, assertion results, and per-model token usage
+
+### Token Usage and Cost Tracking
+
+ReplicantX tracks input/output tokens for every internal LLM call (response generation, goal evaluation, browser planner, screenshot evaluation) and estimates cost using `model_pricing.json`.
+
+**Token usage appears in:**
+- CLI summary table — input, output tokens and estimated cost per scenario and suite total
+- Watch mode — one-line token summary at scenario end
+- Markdown reports — "Token Usage & Cost" section with per-model breakdown
+- JSON reports — `token_usage` object on each `ScenarioReport` and `TestSuiteReport`
+
+**Pricing overrides** (optional, per-scenario YAML):
+```yaml
+model_pricing_overrides:
+  "gpt-4.1-mini":
+    input_cost_per_million: 0.40
+    output_cost_per_million: 1.60
+```
+Keys can include or omit the provider prefix. Overrides take precedence over `model_pricing.json`.
+
+**Key files:**
+- `model_pricing.json` — bundled pricing table (USD per million tokens)
+- `replicantx/tools/token_usage.py` — `TokenUsageTracker` class
+- `replicantx/models.py` — `TokenUsageSummary`, `ModelTokenUsage`, `ModelPricingOverride`
 
 ## Key Design Patterns
 

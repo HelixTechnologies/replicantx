@@ -45,6 +45,7 @@ from replicantx.tools.browser import (
     BrowserAutomationDriver,
     ArtifactManager,
 )
+from replicantx.tools.token_usage import TokenUsageTracker
 
 
 class PlannedAction(BaseModel):
@@ -118,6 +119,11 @@ class BrowserScenarioRunner:
         self._wait_stuck_threshold_seconds = 20.0
         self._wait_stuck_min_consecutive_waits = 6
 
+        # Token usage tracker for this browser scenario run
+        self._token_tracker = TokenUsageTracker(
+            pricing_overrides=dict(config.model_pricing_overrides) if config.model_pricing_overrides else None
+        )
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -160,8 +166,17 @@ class BrowserScenarioRunner:
             await self.browser_driver.start()
             self._attach_diagnostic_listeners()
 
+            # Apply any auth-level extra headers (e.g. Cloudflare bypass) to the
+            # browser context so they are sent with ALL page navigations, not just
+            # the refresh-endpoint POST made inside authenticate().
+            context = self.browser_driver.get_context()
+            if context and hasattr(self.auth_provider, "config"):
+                auth_headers = getattr(self.auth_provider.config, "headers", None)
+                if auth_headers:
+                    await context.set_extra_http_headers(dict(auth_headers))
+
             if hasattr(self.auth_provider, "set_browser_context"):
-                self.auth_provider.set_browser_context(self.browser_driver.get_context())
+                self.auth_provider.set_browser_context(context)
 
             await self.auth_provider.authenticate()
 
@@ -199,6 +214,11 @@ class BrowserScenarioRunner:
                 # Execute the action
                 result = await self._execute_action_turn(action, turn)
                 await self._refresh_identity_context()
+
+                # Optional post-action pause to let the page finish animating or
+                # loading content before the next observation/screenshot is taken.
+                if self.browser_config.post_action_delay_ms > 0:
+                    await asyncio.sleep(self.browser_config.post_action_delay_ms / 1000.0)
 
                 # Check for stuck loop even after failed actions so we can stop
                 # repeated retries with no useful state change.
@@ -286,6 +306,7 @@ class BrowserScenarioRunner:
             browser_diagnostics=self.browser_diagnostics,
             started_at=start_time,
             completed_at=end_time,
+            token_usage=self._token_tracker.get_summary(),
         )
 
     # ------------------------------------------------------------------
@@ -363,6 +384,11 @@ class BrowserScenarioRunner:
                         user_text,
                         BinaryContent(data=screenshot_bytes, media_type="image/png"),
                     ]
+                )
+
+                # Record planner token usage
+                self._token_tracker.record_pydantic_usage(
+                    model_name, result.usage(), purpose="planner"
                 )
 
                 planned = result.output
@@ -692,6 +718,7 @@ class BrowserScenarioRunner:
         from replicantx.models import GoalEvidenceMode
 
         evaluator = GoalEvaluator.create(self.replicant_config, verbose=self.verbose, llm_debug=self.llm_debug)
+        evaluator.set_tracker(self._token_tracker)
 
         conversation_text = "\n".join(
             [
