@@ -78,7 +78,7 @@ Core areas:
 - `replicantx/tools/browser/`: Playwright observation, actions, artifacts, lifecycle
 - `replicantx/tools/token_usage.py`: `TokenUsageTracker` — accumulates LLM usage and estimates cost
 - `replicantx/issue_reporting.py`: standalone browser issue classification, bundle generation, artifact upload, Logfire enrichment, and GitHub filing
-- `model_pricing.json`: bundled per-model pricing table (USD/million tokens)
+- `replicantx/model_pricing.json`: bundled per-model pricing table (USD/million tokens); included in the wheel via `package-data`
 
 ## Browser Issue Reporting
 
@@ -133,7 +133,7 @@ YAML interpolation uses `{{ env.VARIABLE_NAME }}`.
 
 ## Token Usage and Cost Tracking
 
-ReplicantX tracks input/output tokens for every internal LLM call and estimates cost using `model_pricing.json`.
+ReplicantX tracks input/output tokens for every internal LLM call and estimates cost using `replicantx/model_pricing.json` (packaged with the library, not the repo root).
 
 Tracked call sites:
 - `ResponseGenerator.generate_response()` — purpose: `response_generation`

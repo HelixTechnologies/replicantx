@@ -288,7 +288,7 @@ Rich reporting in multiple formats:
 
 ### Token Usage and Cost Tracking
 
-ReplicantX tracks input/output tokens for every internal LLM call (response generation, goal evaluation, browser planner, screenshot evaluation) and estimates cost using `model_pricing.json`.
+ReplicantX tracks input/output tokens for every internal LLM call (response generation, goal evaluation, browser planner, screenshot evaluation) and estimates cost using the bundled `replicantx/model_pricing.json`. That file is package data: `TokenUsageTracker` loads it with `importlib.resources`, so wheels and `pip install` include the same defaults as a source checkout.
 
 **Token usage appears in:**
 - CLI summary table — input, output tokens and estimated cost per scenario and suite total
@@ -306,7 +306,7 @@ model_pricing_overrides:
 Keys can include or omit the provider prefix. Overrides take precedence over `model_pricing.json`.
 
 **Key files:**
-- `model_pricing.json` — bundled pricing table (USD per million tokens)
+- `replicantx/model_pricing.json` — bundled pricing table (USD per million tokens); declared in `[tool.setuptools.package-data]`
 - `replicantx/tools/token_usage.py` — `TokenUsageTracker` class
 - `replicantx/models.py` — `TokenUsageSummary`, `ModelTokenUsage`, `ModelPricingOverride`
 

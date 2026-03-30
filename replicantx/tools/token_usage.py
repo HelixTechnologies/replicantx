@@ -10,23 +10,25 @@ PydanticAI call in a scenario run and emits a :class:`TokenUsageSummary`.
 """
 
 import json
-from pathlib import Path
+from importlib import resources
 from typing import Any, Dict, List, Optional
 
 from ..models import ModelPricingOverride, ModelTokenUsage, TokenUsageSummary
 
-# Resolve the bundled pricing file relative to this module.
-_PRICING_JSON_PATH = Path(__file__).parent.parent.parent / "model_pricing.json"
-
 
 def _load_pricing_table() -> Dict[str, Dict[str, float]]:
-    """Load active model pricing from model_pricing.json.
+    """Load active model pricing from packaged ``replicantx/model_pricing.json``.
 
     Returns a dict keyed by model identifier (no provider prefix) with
     ``{"input": <float>, "output": <float>}`` values (cost per million tokens).
     """
     try:
-        data = json.loads(_PRICING_JSON_PATH.read_text(encoding="utf-8"))
+        text = (
+            resources.files("replicantx")
+            .joinpath("model_pricing.json")
+            .read_text(encoding="utf-8")
+        )
+        data = json.loads(text)
         return {
             entry["model_identifier"]: {
                 "input": float(entry["input_cost_per_million"]),

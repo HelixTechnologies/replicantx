@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "replicantx"
-version = "0.1.18"
+version = "0.1.19"
 description = "End-to-end testing harness for AI agents via web service API"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -76,6 +76,7 @@ include = ["replicantx*"]
 
 # Ship prompt templates (browser planner YAML, etc.) inside wheels/sdists.
 [tool.setuptools.package-data]
+"replicantx" = ["model_pricing.json"]
 "replicantx.prompts" = ["*.yaml", "*.yml"]
 
 [tool.black]
